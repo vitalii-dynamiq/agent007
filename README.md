@@ -163,24 +163,102 @@ cd ../agent
 pip install -r requirements.txt
 ```
 
-### Running
+### Running Locally with ngrok
+
+**Why ngrok?** The platform needs a public URL for:
+1. **E2B Sandbox Callbacks** - The sandbox runs in the cloud and needs to call back to your backend for MCP tools, credential helpers, etc.
+2. **OAuth Redirects** - Composio/Pipedream redirect back to your backend after OAuth authorization completes
+
+#### Step 1: Install ngrok
 
 ```bash
-# Using Make (recommended)
-make dev          # Runs backend + frontend + agent concurrently
+# macOS
+brew install ngrok
 
-# Or manually:
-# Terminal 1: Backend
+# Linux
+curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+sudo apt update && sudo apt install ngrok
+
+# Or download from https://ngrok.com/download
+```
+
+#### Step 2: Start ngrok
+
+```bash
+# Expose your backend (port 8080) to the internet
+ngrok http 8080
+```
+
+You'll see output like:
+```
+Forwarding    https://abc123.ngrok.io -> http://localhost:8080
+```
+
+#### Step 3: Configure BACKEND_URL
+
+Copy the ngrok HTTPS URL and set it in your `.env`:
+
+```bash
+# .env
+BACKEND_URL=https://abc123.ngrok.io    # Your ngrok URL (changes each restart unless you have a paid plan)
+FRONTEND_URL=http://localhost:5173
+```
+
+**Tip**: With a paid ngrok plan, you can use a stable subdomain:
+```bash
+ngrok http 8080 --subdomain=myagent
+# Then use: BACKEND_URL=https://myagent.ngrok.io
+```
+
+#### Step 4: Start the services
+
+```bash
+# Terminal 1: ngrok (keep running)
+ngrok http 8080
+
+# Terminal 2: Backend
 cd backend && go run cmd/server/main.go
 
-# Terminal 2: Frontend
+# Terminal 3: Frontend
 cd frontend && npm run dev
 
-# Terminal 3: Agent (optional - for E2B sandbox execution)
+# Terminal 4: Agent (optional)
 cd agent && python main.py
 ```
 
+Or use Make:
+```bash
+# In separate terminals:
+ngrok http 8080           # Terminal 1
+make dev                  # Terminal 2 (runs backend + frontend)
+```
+
 Visit http://localhost:5173
+
+#### Troubleshooting ngrok
+
+| Issue | Solution |
+|-------|----------|
+| OAuth callback fails | Make sure `BACKEND_URL` matches your current ngrok URL |
+| "Waiting for authorization" spinner | Check ngrok is running and URL is correct in `.env` |
+| E2B sandbox can't reach backend | Verify ngrok tunnel is active, check backend logs |
+| ngrok URL changed | Update `BACKEND_URL` in `.env` and restart backend |
+
+### Running without ngrok (Limited)
+
+You can run without ngrok for basic testing, but:
+- OAuth flows (Composio, Pipedream) won't work - callbacks can't reach localhost
+- E2B sandbox MCP tools won't work - sandbox can't call localhost
+- GitHub App webhooks won't work
+
+```bash
+# Backend only (for API testing)
+cd backend && go run cmd/server/main.go
+
+# Frontend
+cd frontend && npm run dev
+```
 
 ## Configuration
 
