@@ -1,0 +1,54 @@
+# Environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+**/frontend/.env
+
+# Secrets / Keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Go
+backend/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# MCP CLI builds
+mcp-cli/bin/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+venv/
+.venv/

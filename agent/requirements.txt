@@ -1,0 +1,12 @@
+# OpenAI SDK
+openai>=1.0.0
+
+# E2B SDK for sandbox
+e2b>=1.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# FastAPI server
+fastapi>=0.100.0
+uvicorn>=0.24.0
