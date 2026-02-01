@@ -32,13 +32,27 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+// Message represents a chat message for the agent.
+type Message struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	ToolCalls []struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+		Result    string `json:"result,omitempty"`
+	} `json:"tool_calls,omitempty"`
+}
+
 // RunRequest is the request to run the agent.
 type RunRequest struct {
-	Message        string `json:"message"`
-	UserID         string `json:"user_id"`
-	SessionToken   string `json:"session_token"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	MCPProxyURL    string `json:"mcp_proxy_url,omitempty"` // Backend MCP proxy URL
+	Message        string    `json:"message"`
+	Messages       []Message `json:"messages,omitempty"`        // Full conversation history
+	UserID         string    `json:"user_id"`
+	SessionToken   string    `json:"session_token"`
+	ConversationID string    `json:"conversation_id,omitempty"`
+	SandboxID      string    `json:"sandbox_id,omitempty"`      // Reuse existing sandbox
+	MCPProxyURL    string    `json:"mcp_proxy_url,omitempty"`   // Backend MCP proxy URL
 }
 
 // RunResponse is the response from the agent.

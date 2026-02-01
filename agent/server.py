@@ -46,12 +46,21 @@ app.add_middleware(
 )
 
 
+class MessageHistory(BaseModel):
+    """A message in the conversation history."""
+    role: str
+    content: str
+    tool_calls: list[dict] | None = None
+
+
 class RunRequest(BaseModel):
     """Request to run agent."""
     message: str
+    messages: list[MessageHistory] | None = None  # Full conversation history
     user_id: str
     session_token: str
     conversation_id: str | None = None
+    sandbox_id: str | None = None  # Reuse existing sandbox
     mcp_proxy_url: str | None = None  # Backend passes this
 
 
@@ -70,11 +79,18 @@ async def health():
 @app.post("/run", response_model=RunResponse)
 async def run_agent(req: RunRequest):
     """Run agent and return result (non-streaming)."""
+    # Convert message history to list of dicts
+    messages = None
+    if req.messages:
+        messages = [{"role": m.role, "content": m.content, "tool_calls": m.tool_calls} for m in req.messages]
+    
     agent = DynamiqAgent(
         user_id=req.user_id,
         session_token=req.session_token,
         mcp_proxy_url=req.mcp_proxy_url or "",
         conversation_id=req.conversation_id or "",
+        sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
+        messages=messages,  # Pass conversation history
     )
     
     try:
@@ -82,7 +98,7 @@ async def run_agent(req: RunRequest):
         result = await agent.run(req.message)
         return RunResponse(response=result, sandbox_id=sandbox_id)
     finally:
-        await agent.cleanup()
+        await agent.cleanup(keep_sandbox=True)  # Don't kill sandbox for conversation continuity
 
 
 @app.post("/run/stream")
@@ -100,11 +116,18 @@ async def run_agent_stream(req: RunRequest):
     - done: Stream complete
     """
     async def generate_events() -> AsyncGenerator[str, None]:
+        # Convert message history to list of dicts
+        messages = None
+        if req.messages:
+            messages = [{"role": m.role, "content": m.content, "tool_calls": m.tool_calls} for m in req.messages]
+        
         agent = DynamiqAgent(
             user_id=req.user_id,
             session_token=req.session_token,
             mcp_proxy_url=req.mcp_proxy_url or "",
             conversation_id=req.conversation_id or "",
+            sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
+            messages=messages,  # Pass conversation history
         )
         
         # Queue for collecting events from agent
@@ -125,14 +148,18 @@ async def run_agent_stream(req: RunRequest):
                 print(f"[Server] Event queue error: {e}")
         
         try:
-            # Status: Creating sandbox
-            yield sse_event("status", {"message": "Creating sandbox..."})
+            # Status: Creating or reconnecting to sandbox
+            if req.sandbox_id:
+                yield sse_event("status", {"message": "Reconnecting to sandbox..."})
+            else:
+                yield sse_event("status", {"message": "Creating sandbox..."})
             
-            # Setup sandbox
+            # Setup sandbox (will reuse existing if sandbox_id provided)
             sandbox_id = await agent.setup()
             yield sse_event("status", {
                 "message": "Sandbox ready",
-                "sandbox_id": sandbox_id
+                "sandbox_id": sandbox_id,
+                "reused": req.sandbox_id is not None and req.sandbox_id == sandbox_id
             })
             
             # Run agent in background task
@@ -181,7 +208,8 @@ async def run_agent_stream(req: RunRequest):
             yield sse_event("done", {})
         
         finally:
-            await agent.cleanup()
+            # Keep sandbox alive for conversation continuity
+            await agent.cleanup(keep_sandbox=True)
     
     return StreamingResponse(
         generate_events(),

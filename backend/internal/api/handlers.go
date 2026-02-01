@@ -420,14 +420,40 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Agent] WARNING: MCP_PROXY_URL not set - MCP tools won't work from sandbox")
 	}
 
+	// Build message history for context
+	var messages []agent.Message
+	for _, msg := range conv.Messages {
+		agentMsg := agent.Message{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+		// Include tool calls if present
+		for _, tc := range msg.ToolCalls {
+			agentMsg.ToolCalls = append(agentMsg.ToolCalls, struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+				Result    string `json:"result,omitempty"`
+			}{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
+				Result:    tc.Result,
+			})
+		}
+		messages = append(messages, agentMsg)
+	}
+
 	// Call Python agent service with SSE streaming
 	eventChan := make(chan agent.Event)
 	go func() {
 		err := h.agentClient.RunStream(ctx, agent.RunRequest{
 			Message:        req.Content,
+			Messages:       messages,
 			UserID:         userID,
 			SessionToken:   sessionToken,
 			ConversationID: convID,
+			SandboxID:      conv.SandboxID, // Reuse existing sandbox if available
 			MCPProxyURL:    mcpProxyURL,
 		}, eventChan)
 		if err != nil {

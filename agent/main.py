@@ -411,13 +411,18 @@ class DynamiqAgent:
         session_token: str,
         mcp_proxy_url: str = "",
         conversation_id: str = "",
+        sandbox_id: str | None = None,
+        messages: list[dict] | None = None,
     ):
         self.user_id = user_id
         self.session_token = session_token
         self.mcp_proxy_url = mcp_proxy_url or DEFAULT_MCP_PROXY_URL
         self.conversation_id = conversation_id
+        self.existing_sandbox_id = sandbox_id  # For reconnecting to existing sandbox
+        self.messages_history = messages or []  # Conversation history
         self.backend_url = derive_backend_url(self.mcp_proxy_url)
         self.sandbox: Sandbox | None = None
+        self.sandbox_reused = False  # Track if we reused an existing sandbox
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         
         if not self.mcp_proxy_url:
@@ -426,8 +431,36 @@ class DynamiqAgent:
             print("[Agent] WARNING: BACKEND_URL not set - cloud credentials won't be configured")
     
     async def setup(self) -> str:
-        """Create E2B sandbox and install MCP CLI. Returns sandbox ID."""
-        print("[Agent] Creating E2B sandbox...")
+        """Create or reconnect to E2B sandbox. Returns sandbox ID."""
+        
+        # Try to reconnect to existing sandbox if provided
+        if self.existing_sandbox_id:
+            print(f"[Agent] Attempting to reconnect to sandbox: {self.existing_sandbox_id}")
+            try:
+                self.sandbox = await asyncio.to_thread(
+                    Sandbox.connect,
+                    self.existing_sandbox_id,
+                )
+                # Update environment variables for the new session in bashrc so they're available
+                # Note: E2B sandbox commands run in their own shell, so we update bashrc
+                env_setup = f'''
+export MCP_SESSION_TOKEN="{self.session_token}"
+export MCP_PROXY_URL="{self.mcp_proxy_url}"
+export MCP_USER_ID="{self.user_id}"
+'''
+                self.sandbox.files.write("/home/user/.env_session", env_setup)
+                # Source in bashrc if not already there
+                self.sandbox.commands.run(
+                    'grep -q ".env_session" ~/.bashrc || echo \'[ -f ~/.env_session ] && source ~/.env_session\' >> ~/.bashrc'
+                )
+                self.sandbox_reused = True
+                print(f"[Agent] Reconnected to existing sandbox: {self.sandbox.sandbox_id}")
+                return self.sandbox.sandbox_id
+            except Exception as e:
+                print(f"[Agent] Failed to reconnect to sandbox: {e}, creating new one...")
+                # Fall through to create new sandbox
+        
+        print("[Agent] Creating new E2B sandbox...")
         
         # Create sandbox with environment variables using Sandbox.create()
         self.sandbox = await asyncio.to_thread(
@@ -524,10 +557,16 @@ class DynamiqAgent:
         self.sandbox.commands.run("chmod +x /home/user/.local/bin/gh")
         self.sandbox.commands.run(GH_CLI_INSTALL_CMD)
     
-    async def cleanup(self):
-        """Kill sandbox."""
+    async def cleanup(self, keep_sandbox: bool = False):
+        """Clean up resources. If keep_sandbox=True, keep sandbox alive for conversation continuity."""
         if self.sandbox:
             sandbox_id = self.sandbox.sandbox_id
+            if keep_sandbox:
+                print(f"[Agent] Keeping sandbox alive for conversation continuity: {sandbox_id}")
+                # Don't kill the sandbox, just disconnect from it
+                # The sandbox will stay running (E2B sandboxes have a 1-hour default timeout)
+                return
+            
             print(f"[Agent] Cleaning up sandbox: {sandbox_id}")
             try:
                 await asyncio.to_thread(self.sandbox.kill)
@@ -546,8 +585,9 @@ class DynamiqAgent:
         print(f"[Tool] execute_command: {command}")
         
         try:
+            # Source env_session for updated credentials, then run command
             result = self.sandbox.commands.run(
-                f'export PATH="/home/user/.local/bin:$PATH" && cd {cwd} && {command}',
+                f'[ -f ~/.env_session ] && source ~/.env_session; export PATH="/home/user/.local/bin:$PATH" && cd {cwd} && {command}',
                 timeout=120
             )
             
@@ -646,10 +686,50 @@ class DynamiqAgent:
             else:
                 print(f"[Event] {event_type}: {str(data)[:150]}")
         
+        # Build messages array with system prompt, history, and new message
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message}
         ]
+        
+        # Add conversation history (previous messages)
+        if self.messages_history:
+            print(f"[Agent] Including {len(self.messages_history)} messages from history")
+            for msg in self.messages_history:
+                # Convert tool calls to OpenAI format if present
+                msg_dict = {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                
+                # Handle tool calls in assistant messages
+                if msg.get("tool_calls") and msg["role"] == "assistant":
+                    openai_tool_calls = []
+                    for tc in msg["tool_calls"]:
+                        openai_tool_calls.append({
+                            "id": tc.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name", ""),
+                                "arguments": tc.get("arguments", "{}"),
+                            }
+                        })
+                    if openai_tool_calls:
+                        msg_dict["tool_calls"] = openai_tool_calls
+                        # OpenAI requires no content when there are tool_calls
+                        if not msg_dict["content"]:
+                            msg_dict["content"] = None
+                
+                messages.append(msg_dict)
+                
+                # Add tool results as separate messages if they exist
+                if msg.get("tool_calls") and msg["role"] == "assistant":
+                    for tc in msg["tool_calls"]:
+                        if tc.get("result"):
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id", ""),
+                                "content": tc.get("result", ""),
+                            })
+        
+        # Add the new user message
+        messages.append({"role": "user", "content": user_message})
         
         # Agent loop - max 15 iterations
         for iteration in range(15):
