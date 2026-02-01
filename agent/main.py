@@ -179,26 +179,40 @@ The sandbox has an `mcp` CLI for accessing connected services like Gmail, Slack,
 # List connected apps (always run this first!)
 mcp list-apps
 
-# List available tools for an app
+# List available tools for an app (IMPORTANT: check the schema before calling!)
 mcp list-tools <app>
 
-# Call a tool with JSON input
+# Call a tool with JSON input matching the tool's schema
 mcp call <app> <tool> '<json-input>'
 ```
+
+### Important: Check Tool Schemas First
+
+Each tool has its own parameter schema. Always run `mcp list-tools <app>` to see:
+- Available tool names
+- Required and optional parameters
+- Parameter types and descriptions
 
 ### Examples
 
 **Gmail:**
 ```bash
 mcp list-tools gmail
-mcp call gmail gmail-find-email '{"instruction": "newer_than:1d"}'
-mcp call gmail gmail-send-email '{"instruction": "Send an email to user@example.com with subject Hello and body Hi!"}'
+# Check the output for exact parameter names, then call with proper params:
+mcp call gmail gmail-find-email '{"q": "newer_than:1d", "maxResults": 10}'
+mcp call gmail gmail-send-email '{"to": "user@example.com", "subject": "Hello", "body": "Hi there!"}'
 ```
 
 **Slack:**
 ```bash
 mcp list-tools slack
-mcp call slack send_message '{"channel": "#general", "text": "Hello from Dynamiq!"}'
+mcp call slack slack-send-message '{"channel": "#general", "text": "Hello from Dynamiq!"}'
+```
+
+**Google Sheets:**
+```bash
+mcp list-tools google_sheets
+mcp call google_sheets google_sheets-add-single-row '{"sheetId": "...", "worksheetId": "...", "hasHeaders": true, "row": ["value1", "value2"]}'
 ```
 
 ## AWS / Cloud CLIs
@@ -224,8 +238,8 @@ If AWS commands fail with credential errors, ask the user to connect AWS in the 
 ## Important Notes
 
 - **GitHub uses `gh` CLI**, not MCP
-- Most MCP tools accept a single `instruction` string. Avoid using `q`/`query`.
-- Always check connected apps before trying to use them
+- **Always check tool schemas** with `mcp list-tools <app>` before calling - each tool has specific parameters
+- Always check connected apps with `mcp list-apps` before trying to use them
 - The sandbox is isolated - changes don't affect the user's system
 - Be efficient: combine related commands when possible
 - Show clear, formatted results to the user

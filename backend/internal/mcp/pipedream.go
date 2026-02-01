@@ -153,6 +153,7 @@ func (p *PipedreamProvider) mcpRequest(ctx context.Context, userID, app, method 
 	req.Header.Set("x-pd-project-id", p.projectID)
 	req.Header.Set("x-pd-environment", env)
 	req.Header.Set("x-pd-external-user-id", userID)
+	req.Header.Set("x-pd-tool-mode", "tools-only") // Use direct tool calling, not sub-agent mode
 	if app != "" {
 		req.Header.Set("x-pd-app-slug", app)
 	}
