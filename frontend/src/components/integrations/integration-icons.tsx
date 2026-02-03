@@ -42,6 +42,9 @@ import {
   SiOracle,
   SiSnowflake,
   SiDatabricks,
+  SiPostgresql,
+  SiMysql,
+  SiGooglebigquery,
 } from 'react-icons/si'
 
 import { 
@@ -106,9 +109,14 @@ const integrationIcons: Record<string, IconType> = {
   newrelic: SiNewrelic,
   pagerduty: SiPagerduty,
   
-  // Data Warehouses
+  // Data Warehouses & Databases
   snowflake: SiSnowflake,
   databricks: SiDatabricks,
+  postgres: SiPostgresql,
+  mysql: SiMysql,
+  bigquery: SiGooglebigquery,
+  sqlserver: FaDatabase,
+  vertica: FaDatabase,
   
   // Other
   fireflies: FaFire,
@@ -158,6 +166,11 @@ const integrationColors: Record<string, string> = {
   monday: '#FF3D57',
   snowflake: '#29B5E8',
   databricks: '#FF3621',
+  postgres: '#4169E1',
+  mysql: '#4479A1',
+  bigquery: '#669DF6',
+  sqlserver: '#CC2927',
+  vertica: '#0073C6',
 }
 
 // Default icon for unknown integrations

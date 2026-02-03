@@ -73,6 +73,9 @@ const (
 	// AuthToken - Pre-generated token (personal access tokens)
 	AuthToken AuthType = "token"
 
+	// AuthDatabase - Database connection string/credentials
+	AuthDatabase AuthType = "database"
+
 	// AuthNone - No auth required or handled externally
 	AuthNone AuthType = "none"
 )
@@ -155,6 +158,7 @@ type UserIntegration struct {
 	APIKey         string          `json:"-"` // Don't expose
 	ServiceAccount string          `json:"-"` // Don't expose (JSON string)
 	IAMRoleConfig  *IAMRoleConfig  `json:"-"` // Don't expose
+	DatabaseConfig *DatabaseConfig `json:"-"` // Don't expose
 
 	// Display info (safe to expose)
 	AccountName  string `json:"accountName,omitempty"`  // e.g., "john@example.com"
@@ -179,6 +183,16 @@ type IAMRoleConfig struct {
 	RoleARN    string `json:"roleArn"`
 	ExternalID string `json:"externalId,omitempty"`
 	Region     string `json:"region,omitempty"`
+}
+
+// DatabaseConfig represents database connection configuration
+type DatabaseConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Database string `json:"database"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	SSLMode  string `json:"sslMode,omitempty"` // disable, require, verify-ca, verify-full
 }
 
 // SandboxConfig contains configuration for setting up an integration in a sandbox

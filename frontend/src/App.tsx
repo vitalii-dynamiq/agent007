@@ -23,9 +23,14 @@ function App() {
   const loadConversations = useCallback(async () => {
     try {
       const convs = await api.listConversations()
-      setConversations(convs.sort((a, b) => 
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      ))
+      // Handle null/undefined response
+      if (convs && Array.isArray(convs)) {
+        setConversations(convs.sort((a, b) => 
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        ))
+      } else {
+        setConversations([])
+      }
     } catch (err) {
       console.error('Failed to load conversations:', err)
     }
@@ -92,7 +97,7 @@ function App() {
         >
           {showMobileSidebar ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
-        <h1 className="font-bold">Dynamiq Agent</h1>
+        <h1 className="font-bold">Dynamiq</h1>
         <Button
           variant="ghost"
           size="icon"
@@ -123,8 +128,8 @@ function App() {
         <div className="flex h-full flex-col">
           {/* Desktop Header */}
           <div className="hidden border-b p-4 md:block">
-            <h1 className="font-bold text-lg">Dynamiq Agent</h1>
-            <p className="text-xs text-muted-foreground">AI Agent with Tool Integrations</p>
+            <h1 className="font-bold text-lg">Dynamiq</h1>
+            <p className="text-xs text-muted-foreground">Your AI-Powered Data Analyst</p>
           </div>
           
           {/* Conversation List */}
@@ -158,10 +163,10 @@ function App() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 flex-col pt-14 md:pt-0">
-        <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col pt-14 md:pt-0 min-w-0">
+        <div className="flex flex-1 overflow-hidden min-w-0">
           {/* Chat View */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <ChatView
               conversation={selectedConversation || null}
               onConversationUpdate={handleConversationUpdate}

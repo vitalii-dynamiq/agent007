@@ -31,11 +31,12 @@ import (
 type ProviderType string
 
 const (
-	ProviderAWS    ProviderType = "aws"
-	ProviderGCP    ProviderType = "gcp"
-	ProviderAzure  ProviderType = "azure"
-	ProviderIBM    ProviderType = "ibm"
-	ProviderOracle ProviderType = "oracle"
+	ProviderAWS      ProviderType = "aws"
+	ProviderGCP      ProviderType = "gcp"
+	ProviderAzure    ProviderType = "azure"
+	ProviderIBM      ProviderType = "ibm"
+	ProviderOracle   ProviderType = "oracle"
+	ProviderPostgres ProviderType = "postgres"
 )
 
 // =============================================================================
@@ -268,6 +269,35 @@ type KubernetesToken struct {
 }
 
 // =============================================================================
+// PostgreSQL Configuration
+// =============================================================================
+
+// PostgresCredentialConfig represents PostgreSQL database connection configuration.
+// Credentials are injected as environment variables (PGHOST, PGPORT, etc.)
+type PostgresCredentialConfig struct {
+	// Host is the database server hostname or IP
+	Host string `json:"host"`
+
+	// Port is the database server port (default: 5432)
+	Port int `json:"port,omitempty"`
+
+	// Database is the database name
+	Database string `json:"database"`
+
+	// Username for database authentication
+	Username string `json:"username"`
+
+	// Password for database authentication (encrypted at rest)
+	Password string `json:"password"`
+
+	// SSLMode for connection security: disable, require, verify-ca, verify-full
+	SSLMode string `json:"sslMode,omitempty"`
+
+	// ConnectionName is a friendly name for this connection
+	ConnectionName string `json:"connectionName,omitempty"`
+}
+
+// =============================================================================
 // Unified Types
 // =============================================================================
 
@@ -280,12 +310,13 @@ type UserCloudCredentials struct {
 	UpdatedAt time.Time    `json:"updatedAt"`
 
 	// One of these will be set based on Provider
-	AWS    *AWSCredentialConfig         `json:"aws,omitempty"`
-	GCP    *GCPCredentialConfig         `json:"gcp,omitempty"`
-	Azure  *AzureCredentialConfig       `json:"azure,omitempty"`
-	IBM    *IBMCloudCredentialConfig    `json:"ibm,omitempty"`
-	Oracle *OracleCloudCredentialConfig `json:"oracle,omitempty"`
-	K8s    *KubernetesCredentialConfig  `json:"kubernetes,omitempty"`
+	AWS      *AWSCredentialConfig         `json:"aws,omitempty"`
+	GCP      *GCPCredentialConfig         `json:"gcp,omitempty"`
+	Azure    *AzureCredentialConfig       `json:"azure,omitempty"`
+	IBM      *IBMCloudCredentialConfig    `json:"ibm,omitempty"`
+	Oracle   *OracleCloudCredentialConfig `json:"oracle,omitempty"`
+	K8s      *KubernetesCredentialConfig  `json:"kubernetes,omitempty"`
+	Postgres *PostgresCredentialConfig    `json:"postgres,omitempty"`
 }
 
 // CredentialRequest represents a request from a sandbox for credentials

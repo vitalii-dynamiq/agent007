@@ -46,6 +46,14 @@ export function ConnectDialog({ integration, onClose, onSuccess }: ConnectDialog
   const [installPollActive, setInstallPollActive] = useState(false)
   const [atlassianSubdomain, setAtlassianSubdomain] = useState('')
   
+  // Database connection state
+  const [dbHost, setDbHost] = useState('')
+  const [dbPort, setDbPort] = useState('')
+  const [dbDatabase, setDbDatabase] = useState('')
+  const [dbUsername, setDbUsername] = useState('')
+  const [dbPassword, setDbPassword] = useState('')
+  const [dbSslMode, setDbSslMode] = useState('disable')
+  
   // Pipedream client ref
   const pdClientRef = useRef<PipedreamClient | null>(null)
 
@@ -138,6 +146,19 @@ export function ConnectDialog({ integration, onClose, onSuccess }: ConnectDialog
             throw new Error('Invalid JSON format')
           }
           data = { serviceAccountJson: serviceAccountJson.trim() }
+          break
+        case 'database':
+          if (!dbHost.trim()) throw new Error('Host is required')
+          if (!dbDatabase.trim()) throw new Error('Database name is required')
+          if (!dbUsername.trim()) throw new Error('Username is required')
+          data = { 
+            host: dbHost.trim(),
+            port: parseInt(dbPort.trim() || '5432', 10),
+            database: dbDatabase.trim(),
+            username: dbUsername.trim(),
+            password: dbPassword,
+            sslMode: dbSslMode,
+          }
           break
         case 'oauth2':
           if (integration.providerType === 'direct_mcp') {
@@ -603,6 +624,76 @@ export function ConnectDialog({ integration, onClose, onSuccess }: ConnectDialog
                 Paste your service account key JSON from Google Cloud Console
               </p>
             </div>
+          </div>
+        )
+
+      case 'database':
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Host</label>
+                <Input
+                  placeholder="localhost"
+                  value={dbHost}
+                  onChange={(e) => setDbHost(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Port</label>
+                <Input
+                  placeholder="5432"
+                  value={dbPort}
+                  onChange={(e) => setDbPort(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Database</label>
+              <Input
+                placeholder="mydb"
+                value={dbDatabase}
+                onChange={(e) => setDbDatabase(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Username</label>
+              <Input
+                placeholder="postgres"
+                value={dbUsername}
+                onChange={(e) => setDbUsername(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Password</label>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                value={dbPassword}
+                onChange={(e) => setDbPassword(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">SSL Mode</label>
+              <select
+                value={dbSslMode}
+                onChange={(e) => setDbSslMode(e.target.value)}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <option value="disable">Disable</option>
+                <option value="require">Require</option>
+                <option value="verify-ca">Verify CA</option>
+                <option value="verify-full">Verify Full</option>
+              </select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Credentials are stored encrypted and injected into the sandbox environment.
+            </p>
           </div>
         )
 

@@ -53,6 +53,14 @@ class MessageHistory(BaseModel):
     tool_calls: list[dict] | None = None
 
 
+class UploadedFile(BaseModel):
+    """A file uploaded by the user."""
+    name: str
+    size: int
+    type: str
+    data: str  # base64 encoded
+
+
 class RunRequest(BaseModel):
     """Request to run agent."""
     message: str
@@ -62,6 +70,7 @@ class RunRequest(BaseModel):
     conversation_id: str | None = None
     sandbox_id: str | None = None  # Reuse existing sandbox
     mcp_proxy_url: str | None = None  # Backend passes this
+    files: list[UploadedFile] | None = None  # Files to upload to sandbox
 
 
 class RunResponse(BaseModel):
@@ -84,6 +93,11 @@ async def run_agent(req: RunRequest):
     if req.messages:
         messages = [{"role": m.role, "content": m.content, "tool_calls": m.tool_calls} for m in req.messages]
     
+    # Convert files to list of dicts
+    files = None
+    if req.files:
+        files = [{"name": f.name, "size": f.size, "type": f.type, "data": f.data} for f in req.files]
+    
     agent = DynamiqAgent(
         user_id=req.user_id,
         session_token=req.session_token,
@@ -91,6 +105,7 @@ async def run_agent(req: RunRequest):
         conversation_id=req.conversation_id or "",
         sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
         messages=messages,  # Pass conversation history
+        files=files,  # Pass uploaded files
     )
     
     try:
@@ -121,12 +136,23 @@ async def run_agent_stream(req: RunRequest):
         if req.messages:
             messages = [{"role": m.role, "content": m.content, "tool_calls": m.tool_calls} for m in req.messages]
         
+        # Convert files to list of dicts
+        files = None
+        if req.files:
+            print(f"[Server] Received {len(req.files)} file(s)")
+            for f in req.files:
+                print(f"[Server]   - {f.name} ({f.size} bytes, {f.type})")
+            files = [{"name": f.name, "size": f.size, "type": f.type, "data": f.data} for f in req.files]
+        else:
+            print("[Server] No files in request")
+        
         agent = DynamiqAgent(
             user_id=req.user_id,
             session_token=req.session_token,
             mcp_proxy_url=req.mcp_proxy_url or "",
             conversation_id=req.conversation_id or "",
             sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
+            files=files,  # Pass uploaded files
             messages=messages,  # Pass conversation history
         )
         

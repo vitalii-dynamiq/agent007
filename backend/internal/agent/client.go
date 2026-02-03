@@ -44,15 +44,24 @@ type Message struct {
 	} `json:"tool_calls,omitempty"`
 }
 
+// UploadedFile represents a file uploaded by the user.
+type UploadedFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Type string `json:"type"`
+	Data string `json:"data"` // base64 encoded
+}
+
 // RunRequest is the request to run the agent.
 type RunRequest struct {
-	Message        string    `json:"message"`
-	Messages       []Message `json:"messages,omitempty"`        // Full conversation history
-	UserID         string    `json:"user_id"`
-	SessionToken   string    `json:"session_token"`
-	ConversationID string    `json:"conversation_id,omitempty"`
-	SandboxID      string    `json:"sandbox_id,omitempty"`      // Reuse existing sandbox
-	MCPProxyURL    string    `json:"mcp_proxy_url,omitempty"`   // Backend MCP proxy URL
+	Message        string         `json:"message"`
+	Messages       []Message      `json:"messages,omitempty"`        // Full conversation history
+	UserID         string         `json:"user_id"`
+	SessionToken   string         `json:"session_token"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	SandboxID      string         `json:"sandbox_id,omitempty"`      // Reuse existing sandbox
+	MCPProxyURL    string         `json:"mcp_proxy_url,omitempty"`   // Backend MCP proxy URL
+	Files          []UploadedFile `json:"files,omitempty"`           // Files to upload to sandbox
 }
 
 // RunResponse is the response from the agent.

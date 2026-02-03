@@ -156,9 +156,25 @@ func NewHandlers(cfg *config.Config) (*Handlers, error) {
 		cloudHandlers = cloud.NewHandlers(cloudManager)
 	}
 
-	// Initialize integration registry
-	integrationRegistry := integrations.NewRegistry(cfg.JWTSecret)
+	// Initialize integration registry with SQLite persistence
+	var integrationRegistry *integrations.Registry
+	if cfg.DataDir != "" {
+		var err error
+		integrationRegistry, err = integrations.NewRegistryWithStore(cfg.JWTSecret, cfg.DataDir)
+		if err != nil {
+			log.Printf("Warning: Failed to create integration registry with SQLite store: %v", err)
+			log.Printf("Falling back to in-memory integration registry")
+			integrationRegistry = integrations.NewRegistry(cfg.JWTSecret)
+		}
+	} else {
+		integrationRegistry = integrations.NewRegistry(cfg.JWTSecret)
+	}
 	integrationHandlers := integrations.NewHandlers(integrationRegistry, cfg.FrontendURL)
+	
+	// Set cloud manager for database credential storage
+	if cloudManager != nil {
+		integrationHandlers.SetCloudManager(&cloudManagerAdapter{cloudManager})
+	}
 	log.Printf("Integration registry initialized with %d available integrations", len(integrations.GetEnabledIntegrations()))
 
 	// Register OAuth2 handler for GitHub (CLI-based OAuth flow)
@@ -370,16 +386,36 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Content string `json:"content"`
+		Files   []struct {
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+			Type string `json:"type"`
+			Data string `json:"data"`
+		} `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	// Build user message (include file info if files attached)
+	userContent := req.Content
+	if len(req.Files) > 0 {
+		var fileNames []string
+		for _, f := range req.Files {
+			fileNames = append(fileNames, f.Name)
+		}
+		if userContent != "" {
+			userContent = fmt.Sprintf("%s\n\n📎 Attached files: %s", userContent, strings.Join(fileNames, ", "))
+		} else {
+			userContent = fmt.Sprintf("📎 Attached files: %s", strings.Join(fileNames, ", "))
+		}
+	}
+
 	// Add user message
 	h.store.AddMessage(convID, store.Message{
 		Role:    "user",
-		Content: req.Content,
+		Content: userContent,
 	})
 
 	// Set up SSE
@@ -444,6 +480,23 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 		messages = append(messages, agentMsg)
 	}
 
+	// Convert files to agent format
+	var agentFiles []agent.UploadedFile
+	if len(req.Files) > 0 {
+		log.Printf("[SendMessage] Received %d file(s)", len(req.Files))
+		for _, f := range req.Files {
+			log.Printf("[SendMessage]   - %s (%d bytes, %s)", f.Name, f.Size, f.Type)
+			agentFiles = append(agentFiles, agent.UploadedFile{
+				Name: f.Name,
+				Size: f.Size,
+				Type: f.Type,
+				Data: f.Data,
+			})
+		}
+	} else {
+		log.Printf("[SendMessage] No files in request")
+	}
+
 	// Call Python agent service with SSE streaming
 	eventChan := make(chan agent.Event)
 	go func() {
@@ -455,6 +508,7 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 			ConversationID: convID,
 			SandboxID:      conv.SandboxID, // Reuse existing sandbox if available
 			MCPProxyURL:    mcpProxyURL,
+			Files:          agentFiles,
 		}, eventChan)
 		if err != nil {
 			log.Printf("[Agent] Stream error: %v", err)
@@ -860,4 +914,26 @@ func sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, dat
 
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, dataStr)
 	flusher.Flush()
+}
+
+// cloudManagerAdapter adapts cloud.Manager to the integrations.CloudCredentialManager interface
+type cloudManagerAdapter struct {
+	manager *cloud.Manager
+}
+
+func (a *cloudManagerAdapter) StorePostgresCredentials(userID, name string, config interface{}) error {
+	// Type assert to the expected type from integrations package
+	if dbConfig, ok := config.(*integrations.DatabaseConfig); ok {
+		pgConfig := &cloud.PostgresCredentialConfig{
+			Host:           dbConfig.Host,
+			Port:           dbConfig.Port,
+			Database:       dbConfig.Database,
+			Username:       dbConfig.Username,
+			Password:       dbConfig.Password,
+			SSLMode:        dbConfig.SSLMode,
+			ConnectionName: name,
+		}
+		return a.manager.StorePostgresCredentials(userID, name, pgConfig)
+	}
+	return fmt.Errorf("invalid config type")
 }

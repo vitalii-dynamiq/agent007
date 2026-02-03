@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ type Registry struct {
 
 	// Encryption key for storing credentials
 	encryptionKey string
+
+	// SQLite store for persistence (optional)
+	store *SQLiteStore
 }
 
 // OAuth2Handler handles OAuth2 flows for a service
@@ -28,13 +32,45 @@ type OAuth2Handler interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*OAuth2Token, error)
 }
 
-// NewRegistry creates a new integration registry
+// NewRegistry creates a new integration registry (in-memory only)
 func NewRegistry(encryptionKey string) *Registry {
 	return &Registry{
 		userIntegrations: make(map[string]map[string]*UserIntegration),
 		oauth2Handlers:   make(map[string]OAuth2Handler),
 		encryptionKey:    encryptionKey,
 	}
+}
+
+// NewRegistryWithStore creates a new integration registry with SQLite persistence
+func NewRegistryWithStore(encryptionKey string, dataDir string) (*Registry, error) {
+	store, err := NewSQLiteStore(dataDir, encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SQLite store: %w", err)
+	}
+
+	// Load existing integrations from the database
+	userIntegrations := store.GetAllUserIntegrations()
+
+	count := 0
+	for _, integrations := range userIntegrations {
+		count += len(integrations)
+	}
+	log.Printf("Loaded %d user integrations from SQLite store", count)
+
+	return &Registry{
+		userIntegrations: userIntegrations,
+		oauth2Handlers:   make(map[string]OAuth2Handler),
+		encryptionKey:    encryptionKey,
+		store:            store,
+	}, nil
+}
+
+// Close closes the registry and its underlying store
+func (r *Registry) Close() error {
+	if r.store != nil {
+		return r.store.Close()
+	}
+	return nil
 }
 
 // RegisterOAuth2Handler registers an OAuth2 handler for an integration
@@ -63,6 +99,15 @@ func (r *Registry) ConnectIntegration(userID, integrationID string, ui *UserInte
 	ui.Enabled = true
 
 	r.userIntegrations[userID][integrationID] = ui
+
+	// Persist to SQLite store if available
+	if r.store != nil {
+		if err := r.store.SaveUserIntegration(ui); err != nil {
+			log.Printf("Warning: Failed to persist integration to SQLite: %v", err)
+			// Don't fail the operation, just log the warning
+		}
+	}
+
 	return nil
 }
 
@@ -76,6 +121,15 @@ func (r *Registry) DisconnectIntegration(userID, integrationID string) error {
 	}
 
 	delete(r.userIntegrations[userID], integrationID)
+
+	// Delete from SQLite store if available
+	if r.store != nil {
+		if err := r.store.DeleteUserIntegration(userID, integrationID); err != nil {
+			log.Printf("Warning: Failed to delete integration from SQLite: %v", err)
+			// Don't fail the operation, just log the warning
+		}
+	}
+
 	return nil
 }
 

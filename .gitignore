@@ -6,6 +6,11 @@
 **/.env
 **/frontend/.env
 
+# Local data directory (SQLite databases, etc.)
+.data/
+**/data/
+**/.data/
+
 # Secrets / Keys
 *.pem
 *.key

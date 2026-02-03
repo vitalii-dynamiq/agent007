@@ -10,6 +10,9 @@ type Config struct {
 	FrontendURL string
 	BackendURL  string
 
+	// Data directory for local persistence (SQLite, etc.)
+	DataDir string
+
 	// LLM
 	LLMProvider string
 	LLMAPIKey   string
@@ -105,6 +108,9 @@ func Load() *Config {
 		Port:        getEnv("PORT", "8080"),
 		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:5173"),
 		BackendURL:  getEnv("BACKEND_URL", "http://localhost:8080"),
+
+		// Data directory defaults to .data in the current working directory
+		DataDir: getEnv("DATA_DIR", ".data"),
 
 		LLMProvider: getEnv("LLM_PROVIDER", "openai"),
 		LLMAPIKey:   getEnv("LLM_API_KEY", ""),

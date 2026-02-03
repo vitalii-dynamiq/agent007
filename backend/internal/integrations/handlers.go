@@ -10,10 +10,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// CloudCredentialManager interface for storing database credentials
+type CloudCredentialManager interface {
+	StorePostgresCredentials(userID, name string, config interface{}) error
+}
+
 // Handlers contains HTTP handlers for integration operations
 type Handlers struct {
-	registry    *Registry
-	frontendURL string
+	registry     *Registry
+	frontendURL  string
+	cloudManager CloudCredentialManager
 }
 
 // NewHandlers creates new integration handlers
@@ -22,6 +28,11 @@ func NewHandlers(registry *Registry, frontendURL string) *Handlers {
 		registry:    registry,
 		frontendURL: strings.TrimRight(frontendURL, "/"),
 	}
+}
+
+// SetCloudManager sets the cloud manager for database credential storage
+func (h *Handlers) SetCloudManager(cm CloudCredentialManager) {
+	h.cloudManager = cm
 }
 
 // HandleListIntegrations lists all available integrations with connection status
@@ -117,6 +128,14 @@ func (h *Handlers) HandleConnectIntegration(w http.ResponseWriter, r *http.Reque
 		// For service account
 		ServiceAccountJSON string `json:"serviceAccountJson,omitempty"`
 
+		// For database connections
+		Host     string `json:"host,omitempty"`
+		Port     int    `json:"port,omitempty"`
+		Database string `json:"database,omitempty"`
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"`
+		SSLMode  string `json:"sslMode,omitempty"`
+
 		// Account info
 		AccountName string `json:"accountName,omitempty"`
 		AccountID   string `json:"accountId,omitempty"`
@@ -181,6 +200,41 @@ func (h *Handlers) HandleConnectIntegration(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		ui.ServiceAccount = req.ServiceAccountJSON
+
+	case AuthDatabase:
+		if req.Host == "" || req.Database == "" || req.Username == "" {
+			http.Error(w, "host, database, and username are required for database connection", http.StatusBadRequest)
+			return
+		}
+		port := req.Port
+		if port == 0 {
+			port = 5432 // Default PostgreSQL port
+		}
+		sslMode := req.SSLMode
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+		ui.DatabaseConfig = &DatabaseConfig{
+			Host:     req.Host,
+			Port:     port,
+			Database: req.Database,
+			Username: req.Username,
+			Password: req.Password,
+			SSLMode:  sslMode,
+		}
+		ui.AccountName = req.Database + "@" + req.Host
+		
+		// Also store in cloud manager for sandbox injection
+		if h.cloudManager != nil {
+			name := req.AccountName
+			if name == "" {
+				name = req.Database + "@" + req.Host
+			}
+			// Store as generic interface - cloud manager will handle the type
+			if err := h.cloudManager.StorePostgresCredentials(userID, name, ui.DatabaseConfig); err != nil {
+				log.Printf("Warning: Failed to store database credentials in cloud manager: %v", err)
+			}
+		}
 
 	case AuthOAuth2:
 		// For OAuth2, we expect either:

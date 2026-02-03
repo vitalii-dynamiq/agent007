@@ -53,6 +53,23 @@ func (m *Manager) StoreGCPCredentials(userID, name string, config *GCPCredential
 	return m.store.StoreGCPCredentials(userID, name, config)
 }
 
+// StorePostgresCredentials stores PostgreSQL credentials for a user
+func (m *Manager) StorePostgresCredentials(userID, name string, config *PostgresCredentialConfig) error {
+	// Set default port if not specified
+	if config.Port == 0 {
+		config.Port = 5432
+	}
+	if config.SSLMode == "" {
+		config.SSLMode = "disable"
+	}
+	return m.store.StorePostgresCredentials(userID, name, config)
+}
+
+// GetPostgresCredentials retrieves PostgreSQL credentials for a user
+func (m *Manager) GetPostgresCredentials(userID string) (*PostgresCredentialConfig, error) {
+	return m.store.GetPostgresCredentials(userID)
+}
+
 // GetCredentials returns credentials for a sandbox based on session token
 func (m *Manager) GetCredentials(ctx context.Context, req *CredentialRequest) (*CredentialResponse, error) {
 	// Validate the session token
@@ -185,6 +202,20 @@ func (m *Manager) GenerateSandboxCredentialConfig(userID, sandboxID, conversatio
 		config.GCPConfig = m.generateGCPConfig(sessionToken, sandboxID)
 	}
 
+	if m.store.HasCredentials(userID, ProviderPostgres) {
+		if pgConfig, err := m.store.GetPostgresCredentials(userID); err == nil {
+			config.PostgresEnabled = true
+			config.PostgresEnvVars = map[string]string{
+				"PGHOST":     pgConfig.Host,
+				"PGPORT":     fmt.Sprintf("%d", pgConfig.Port),
+				"PGDATABASE": pgConfig.Database,
+				"PGUSER":     pgConfig.Username,
+				"PGPASSWORD": pgConfig.Password,
+				"PGSSLMODE":  pgConfig.SSLMode,
+			}
+		}
+	}
+
 	return config, nil
 }
 
@@ -204,6 +235,10 @@ type SandboxCredentialConfig struct {
 	GCPEnabled          bool   `json:"gcpEnabled"`
 	GCPCredentialHelper string `json:"gcpCredentialHelper,omitempty"` // Shell script
 	GCPConfig           string `json:"gcpConfig,omitempty"`           // Application default credentials JSON
+
+	// PostgreSQL
+	PostgresEnabled bool              `json:"postgresEnabled"`
+	PostgresEnvVars map[string]string `json:"postgresEnvVars,omitempty"` // Environment variables for psql
 }
 
 // generateAWSCredentialHelper generates the credential_process script for AWS

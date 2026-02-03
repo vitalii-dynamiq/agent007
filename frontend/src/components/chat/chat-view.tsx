@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Message, ToolCall } from './message'
-import { MessageInput } from './message-input'
+import { Message, ToolCall, ToolCallsGroup } from './message'
+import { MessageInput, type UploadedFile } from './message-input'
 import { ToolSelector } from './tool-selector'
 import { api, type Conversation, type SSEEvent } from '@/lib/api'
-import { Loader2, Terminal } from 'lucide-react'
+import { Loader2, Terminal, Zap } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface ChatViewProps {
   conversation: Conversation | null
@@ -15,6 +16,7 @@ interface StreamingState {
   status?: string
   toolCalls: Map<string, { name: string; arguments: string; result?: string; isExecuting: boolean }>
   assistantContent: string
+  userMessage?: string  // The message the user just sent
 }
 
 export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) {
@@ -36,19 +38,29 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
     }
   }, [conversation?.messages, streamingState])
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (content: string, files?: UploadedFile[]) => {
     if (!conversation) return
+
+    // Build user message with file info
+    let userMessage = content
+    if (files && files.length > 0) {
+      const fileList = files.map(f => f.name).join(', ')
+      userMessage = content 
+        ? `${content}\n\n📎 Attached files: ${fileList}`
+        : `📎 Attached files: ${fileList}`
+    }
 
     setIsLoading(true)
     setStreamingState({
-      status: 'Sending...',
+      status: files?.length ? 'Uploading files...' : 'Sending...',
       toolCalls: new Map(),
       assistantContent: '',
+      userMessage,  // Store the user's message to show immediately
     })
 
     abortRef.current = api.sendMessage(conversation.id, content, (event: SSEEvent) => {
       handleSSEEvent(event)
-    })
+    }, files)
   }
 
   const handleSSEEvent = (event: SSEEvent) => {
@@ -155,7 +167,7 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col min-w-0 overflow-hidden">
       <div className="border-b px-4 py-3 flex items-center justify-between">
         <div className="min-w-0 flex-1">
           <h2 className="font-semibold truncate">
@@ -174,13 +186,13 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
         />
       </div>
 
-      <ScrollArea className="flex-1" ref={scrollRef}>
-        <div className="divide-y">
+      <ScrollArea className="flex-1 overflow-hidden" ref={scrollRef}>
+        <div className="divide-y divide-border/40 overflow-hidden">
           {conversation.messages.map((msg) => (
             <div key={msg.id}>
               {/* Show tool calls for this message if any */}
               {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <>
+                <ToolCallsGroup count={msg.toolCalls.length}>
                   {msg.toolCalls.map((tc) => (
                     <ToolCall
                       key={tc.id}
@@ -190,7 +202,7 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
                       isExecuting={false}
                     />
                   ))}
-                </>
+                </ToolCallsGroup>
               )}
               {/* Show the message content */}
               {msg.content && (
@@ -204,25 +216,43 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
 
           {/* Streaming state */}
           {streamingState && (
-            <>
-              {/* Status indicator */}
-              {streamingState.status && (
-                <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {streamingState.status}
+            <div className="py-1">
+              {/* Show user's message immediately */}
+              {streamingState.userMessage && (
+                <Message
+                  role="user"
+                  content={streamingState.userMessage}
+                />
+              )}
+              
+              {/* Compact status indicator */}
+              {streamingState.status && !streamingState.assistantContent && (
+                <div className={cn(
+                  "flex items-center gap-2 px-4 py-2 text-xs",
+                  "text-muted-foreground/70"
+                )}>
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="h-3 w-3 text-amber-500/70" />
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  </div>
+                  <span className="truncate">{streamingState.status}</span>
                 </div>
               )}
 
-              {/* Tool calls */}
-              {Array.from(streamingState.toolCalls.entries()).map(([id, tc]) => (
-                <ToolCall
-                  key={id}
-                  name={tc.name}
-                  arguments={tc.arguments}
-                  result={tc.result}
-                  isExecuting={tc.isExecuting}
-                />
-              ))}
+              {/* Tool calls - grouped */}
+              {streamingState.toolCalls.size > 0 && (
+                <ToolCallsGroup count={streamingState.toolCalls.size}>
+                  {Array.from(streamingState.toolCalls.entries()).map(([id, tc]) => (
+                    <ToolCall
+                      key={id}
+                      name={tc.name}
+                      arguments={tc.arguments}
+                      result={tc.result}
+                      isExecuting={tc.isExecuting}
+                    />
+                  ))}
+                </ToolCallsGroup>
+              )}
 
               {/* Assistant response */}
               {streamingState.assistantContent && (
@@ -232,7 +262,7 @@ export function ChatView({ conversation, onConversationUpdate }: ChatViewProps) 
                   isStreaming={isLoading}
                 />
               )}
-            </>
+            </div>
           )}
         </div>
       </ScrollArea>

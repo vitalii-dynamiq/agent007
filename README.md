@@ -110,13 +110,13 @@ The platform supports multiple methods for connecting to external services:
 
 ## Features
 
-### 39 Pre-configured Integrations
+### 44+ Pre-configured Integrations
 
 | Category | Integrations |
 |----------|--------------|
 | **Developer Tools** | GitHub, Stripe, Vercel, Supabase, Neon, Cloudflare, Sentry, Linear, Jira, Confluence, ClickUp |
 | **Cloud** | AWS, Google Cloud, Microsoft Azure, IBM Cloud, Oracle Cloud, Kubernetes |
-| **Data & Analytics** | Snowflake, Databricks |
+| **Databases** | PostgreSQL, MySQL, BigQuery, Snowflake, Databricks, SQL Server, Vertica |
 | **Productivity** | Gmail, Google Calendar, Google Drive, OneDrive, SharePoint, Notion, Asana, Monday.com, Trello, Airtable, HubSpot |
 | **Communication** | Slack, Discord, Microsoft Teams, Outlook |
 | **Monitoring** | Datadog, New Relic, PagerDuty |
@@ -139,6 +139,7 @@ The platform supports multiple methods for connecting to external services:
 - Go 1.24+
 - Node.js 20+
 - Python 3.10+
+- Docker & Docker Compose (for PostgreSQL analytics database)
 - E2B account (https://e2b.dev)
 
 ### Installation
@@ -217,24 +218,50 @@ ngrok http 8080 --subdomain=myagent
 # Terminal 1: ngrok (keep running)
 ngrok http 8080
 
-# Terminal 2: Backend
-cd backend && go run cmd/server/main.go
+# Terminal 2: Start database (Docker)
+make db
 
-# Terminal 3: Frontend
-cd frontend && npm run dev
+# Terminal 3: Backend
+make backend
 
-# Terminal 4: Agent (optional)
-cd agent && python main.py
+# Terminal 4: Agent
+make agent
+
+# Terminal 5: Frontend
+make frontend
 ```
 
-Or use Make:
+Or use the quick start:
 ```bash
 # In separate terminals:
-ngrok http 8080           # Terminal 1
-make dev                  # Terminal 2 (runs backend + frontend)
+ngrok http 8080           # Terminal 1 - ngrok tunnel
+make dev                  # Terminal 2 - shows instructions after starting DB
+make backend              # Terminal 3 - Go backend on :8080
+make agent                # Terminal 4 - Python agent on :8082
+make frontend             # Terminal 5 - React frontend on :5173
 ```
 
 Visit http://localhost:5173
+
+#### Database (PostgreSQL Analytics)
+
+The platform includes a PostgreSQL sidecar for analytics capabilities:
+
+```bash
+# Start the database
+make db
+
+# Connect via psql
+make db-psql
+
+# View logs
+make db-logs
+
+# Reset database (destroys data)
+make db-reset
+```
+
+The database is pre-populated with sample analytics data (sales, marketing, support schemas) for AI agent queries.
 
 #### Troubleshooting ngrok
 
@@ -571,6 +598,7 @@ go test ./internal/cloud/... -v
 | `/api/cloud/credentials/gcp` | POST | Store GCP service account |
 | `/api/cloud/aws/credentials` | POST | Get AWS temp credentials (sandbox) |
 | `/api/cloud/gcp/credentials` | POST | Get GCP access token (sandbox) |
+| `/api/cloud/credentials/postgres` | POST | Store PostgreSQL credentials |
 
 ---
 

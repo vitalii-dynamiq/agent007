@@ -8,13 +8,17 @@ MCP tools are accessed via CLI commands in the sandbox calling our backend proxy
 import os
 import json
 import asyncio
+import base64
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable
 from dotenv import load_dotenv
 from openai import OpenAI
 from e2b import Sandbox
 
-load_dotenv()
+# Load .env from project root (parent of agent/ directory)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 # Configuration
 OPENAI_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -111,6 +115,9 @@ export GH_TOKEN="$TOKEN"
 exec /home/user/.local/bin/gh-real "$@"
 """
 
+# PostgreSQL CLI installation command
+PSQL_CLI_INSTALL_CMD = """apt-get update && apt-get install -y postgresql-client 2>/dev/null || true"""
+
 
 def derive_backend_url(mcp_proxy_url: str) -> str:
     if BACKEND_URL:
@@ -129,6 +136,117 @@ You have access to a sandbox where you can:
 - Write and read files
 - Install packages (apt, pip, npm, etc.)
 - Run scripts in any language (Python, Node.js, Bash, etc.)
+
+## Data Visualization with Vega-Lite
+
+When the user asks for data analysis, charts, or visualizations, you should generate **Vega-Lite** specifications. The chat interface will automatically render these as interactive charts.
+
+### How to Create Charts
+
+Output Vega-Lite JSON specifications inside a code block with the `vega-lite` or `vega` language tag:
+
+```vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": { "values": [...] },
+  "mark": "bar",
+  "encoding": {...}
+}
+```
+
+### Common Chart Examples
+
+**Bar Chart:**
+```vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {"category": "A", "value": 28},
+      {"category": "B", "value": 55},
+      {"category": "C", "value": 43}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category", "type": "nominal", "title": "Category"},
+    "y": {"field": "value", "type": "quantitative", "title": "Value"},
+    "color": {"field": "category", "type": "nominal", "legend": null}
+  }
+}
+```
+
+**Line Chart (Time Series):**
+```vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {"date": "2024-01", "value": 100},
+      {"date": "2024-02", "value": 150},
+      {"date": "2024-03", "value": 120}
+    ]
+  },
+  "mark": {"type": "line", "point": true},
+  "encoding": {
+    "x": {"field": "date", "type": "temporal", "title": "Date"},
+    "y": {"field": "value", "type": "quantitative", "title": "Value"}
+  }
+}
+```
+
+**Pie/Donut Chart:**
+```vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {"category": "Desktop", "value": 60},
+      {"category": "Mobile", "value": 35},
+      {"category": "Tablet", "value": 5}
+    ]
+  },
+  "mark": {"type": "arc", "innerRadius": 50},
+  "encoding": {
+    "theta": {"field": "value", "type": "quantitative"},
+    "color": {"field": "category", "type": "nominal", "title": "Device"}
+  }
+}
+```
+
+**Scatter Plot:**
+```vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {"x": 1, "y": 2, "category": "A"},
+      {"x": 3, "y": 4, "category": "B"}
+    ]
+  },
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "x", "type": "quantitative"},
+    "y": {"field": "y", "type": "quantitative"},
+    "color": {"field": "category", "type": "nominal"}
+  }
+}
+```
+
+### Visualization Guidelines
+
+1. **Always use Vega-Lite** for data visualizations - it will be rendered interactively
+2. **Include the $schema** for proper rendering
+3. **Embed data directly** in the spec using `data.values` array
+4. **Use appropriate chart types**:
+   - Bar charts for comparisons
+   - Line charts for trends over time
+   - Pie/donut for proportions
+   - Scatter plots for correlations
+   - Area charts for cumulative values
+5. **Add meaningful titles** to axes and legends
+6. **When analyzing data from APIs or files**, extract the relevant data and create a Vega-Lite visualization
+7. Charts support interactivity: tooltips show on hover, users can zoom/pan
 
 ## GitHub CLI (gh)
 
@@ -228,6 +346,65 @@ aws configure list
 
 If AWS commands fail with credential errors, ask the user to connect AWS in the Integrations panel.
 
+## PostgreSQL Database
+
+PostgreSQL is accessed via the **`psql` CLI** (NOT via MCP). Credentials are pre-configured via environment variables.
+
+**Common commands:**
+```bash
+# Check connection (uses PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD env vars)
+psql -c "SELECT version();"
+
+# List databases
+psql -c "\l"
+
+# List tables in current database
+psql -c "\dt"
+
+# List tables in a specific schema
+psql -c "\dt sales.*"
+
+# Describe a table
+psql -c "\d tablename"
+
+# Run a query
+psql -c "SELECT * FROM table LIMIT 10"
+
+# Run complex queries with heredoc
+psql <<EOF
+SELECT 
+    column1, 
+    column2,
+    COUNT(*) as count
+FROM schema.table
+WHERE condition
+GROUP BY column1, column2
+ORDER BY count DESC
+LIMIT 20;
+EOF
+```
+
+**Discovering the database schema:**
+
+When connected to a PostgreSQL database, always discover what's available first:
+```bash
+# List all schemas
+psql -c "\dn"
+
+# List all tables in all schemas
+psql -c "\dt *.*"
+
+# Describe a specific table
+psql -c "\d schema.tablename"
+
+# Get column info
+psql -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position;"
+```
+
+**IMPORTANT:** Do NOT assume what tables exist. Always run discovery commands first to see the actual database schema before running queries.
+
+If psql commands fail with "command not found", ask the user to connect PostgreSQL in the Integrations panel first.
+
 ## Workflow
 
 1. For **GitHub**: Use `gh` CLI directly (e.g., `gh repo list`, `gh issue list`)
@@ -235,11 +412,35 @@ If AWS commands fail with credential errors, ask the user to connect AWS in the 
 3. For **other services** (Gmail, Slack, Notion, etc.): Use `mcp list-apps` first, then `mcp list-tools <app>` and `mcp call`
 4. If a service isn't connected, tell the user to connect it via the Integrations panel
 
+## File Uploads
+
+Users can upload files to the sandbox. Uploaded files are stored in `/home/user/uploads/`.
+
+**CRITICAL:** When a user mentions an uploaded file, attachment, or asks about a file they uploaded:
+1. ALWAYS run `ls -la /home/user/uploads/` FIRST to check what files are available
+2. Do NOT rely on previous conversation history about uploads - always check the current state
+3. For PDFs, use `pdftotext` or Python libraries to extract text
+4. For CSV/JSON/Excel files, use Python pandas to read and analyze
+
+Example workflow for uploaded files:
+```bash
+# Always check uploads first
+ls -la /home/user/uploads/
+
+# For PDF files - install pdftotext if needed
+apt-get update && apt-get install -y poppler-utils
+pdftotext /home/user/uploads/document.pdf -
+
+# Or use Python
+python3 -c "import subprocess; print(subprocess.run(['pdftotext', '/home/user/uploads/document.pdf', '-'], capture_output=True, text=True).stdout)"
+```
+
 ## Important Notes
 
 - **GitHub uses `gh` CLI**, not MCP
 - **Always check tool schemas** with `mcp list-tools <app>` before calling - each tool has specific parameters
 - Always check connected apps with `mcp list-apps` before trying to use them
+- **Always check `/home/user/uploads/`** when user mentions uploaded files - do not assume it's empty
 - The sandbox is isolated - changes don't affect the user's system
 - Be efficient: combine related commands when possible
 - Show clear, formatted results to the user
@@ -427,6 +628,7 @@ class DynamiqAgent:
         conversation_id: str = "",
         sandbox_id: str | None = None,
         messages: list[dict] | None = None,
+        files: list[dict] | None = None,
     ):
         self.user_id = user_id
         self.session_token = session_token
@@ -434,6 +636,7 @@ class DynamiqAgent:
         self.conversation_id = conversation_id
         self.existing_sandbox_id = sandbox_id  # For reconnecting to existing sandbox
         self.messages_history = messages or []  # Conversation history
+        self.pending_files = files or []  # Files to upload to sandbox
         self.backend_url = derive_backend_url(self.mcp_proxy_url)
         self.sandbox: Sandbox | None = None
         self.sandbox_reused = False  # Track if we reused an existing sandbox
@@ -455,18 +658,41 @@ class DynamiqAgent:
                     Sandbox.connect,
                     self.existing_sandbox_id,
                 )
-                # Update environment variables for the new session in bashrc so they're available
+                # Update MCP environment variables - append to existing .env_session to preserve PG creds
                 # Note: E2B sandbox commands run in their own shell, so we update bashrc
-                env_setup = f'''
+                mcp_env_setup = f'''
 export MCP_SESSION_TOKEN="{self.session_token}"
 export MCP_PROXY_URL="{self.mcp_proxy_url}"
 export MCP_USER_ID="{self.user_id}"
 '''
-                self.sandbox.files.write("/home/user/.env_session", env_setup)
+                # Read existing .env_session to preserve PostgreSQL credentials
+                try:
+                    existing_env = self.sandbox.files.read("/home/user/.env_session")
+                    # Remove old MCP vars (they'll be replaced)
+                    lines = [l for l in existing_env.split('\n') 
+                             if not l.startswith('export MCP_')]
+                    existing_env = '\n'.join(lines)
+                except:
+                    existing_env = ""
+                
+                # Write combined env file (preserving PG creds, updating MCP vars)
+                self.sandbox.files.write("/home/user/.env_session", existing_env + mcp_env_setup)
+                
                 # Source in bashrc if not already there
                 self.sandbox.commands.run(
                     'grep -q ".env_session" ~/.bashrc || echo \'[ -f ~/.env_session ] && source ~/.env_session\' >> ~/.bashrc'
                 )
+                
+                # Ensure uploads directory exists (for file checks)
+                self.sandbox.commands.run("mkdir -p /home/user/uploads")
+                
+                # Re-run cloud credentials setup to ensure everything is current
+                # (This also re-installs psql if needed and refreshes credentials)
+                await self._setup_cloud_credentials()
+                
+                # Upload any pending files
+                await self._upload_files()
+                
                 self.sandbox_reused = True
                 print(f"[Agent] Reconnected to existing sandbox: {self.sandbox.sandbox_id}")
                 return self.sandbox.sandbox_id
@@ -489,6 +715,12 @@ export MCP_USER_ID="{self.user_id}"
         
         print(f"[Agent] Sandbox created: {self.sandbox.sandbox_id}")
         
+        # Create uploads directory (always, so agent can check it)
+        self.sandbox.commands.run("mkdir -p /home/user/uploads")
+        
+        # Install data science packages
+        await self._install_data_packages()
+        
         # Install MCP CLI
         await self._install_mcp_cli()
 
@@ -498,7 +730,22 @@ export MCP_USER_ID="{self.user_id}"
         # Install GitHub CLI wrapper (gh)
         await self._setup_github_cli()
         
+        # Upload any pending files
+        await self._upload_files()
+        
         return self.sandbox.sandbox_id
+    
+    async def _install_data_packages(self):
+        """Install common data science packages in the sandbox."""
+        print("[Agent] Installing data science packages...")
+        result = self.sandbox.commands.run(
+            "pip install -q pandas numpy scipy psycopg2-binary openpyxl",
+            timeout=120  # Allow more time for package installation
+        )
+        if result.exit_code == 0:
+            print("[Agent] Data science packages installed successfully")
+        else:
+            print(f"[Agent] Warning: Package installation had issues: {result.stderr}")
     
     async def _install_mcp_cli(self):
         """Upload MCP CLI script to sandbox."""
@@ -524,7 +771,11 @@ export MCP_USER_ID="{self.user_id}"
         print("[Agent] Ensuring AWS CLI is installed...")
         self.sandbox.commands.run(AWS_CLI_INSTALL_CMD)
 
-        print("[Agent] Fetching sandbox cloud credential config...")
+        print(f"[Agent] Fetching sandbox cloud credential config...")
+        print(f"[Agent] DEBUG: backend_url={self.backend_url}")
+        print(f"[Agent] DEBUG: user_id={self.user_id}")
+        print(f"[Agent] DEBUG: sandbox_id={self.sandbox.sandbox_id}")
+        
         payload = json.dumps({
             "userId": self.user_id,
             "sandboxId": self.sandbox.sandbox_id,
@@ -532,15 +783,20 @@ export MCP_USER_ID="{self.user_id}"
         }).encode()
 
         try:
+            url = f"{self.backend_url}/api/cloud/sandbox-config"
+            print(f"[Agent] DEBUG: Requesting {url}")
             req = urllib.request.Request(
-                f"{self.backend_url}/api/cloud/sandbox-config",
+                url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 config = json.loads(resp.read())
+            print(f"[Agent] DEBUG: Got config: postgresEnabled={config.get('postgresEnabled')}")
         except Exception as e:
             print(f"[Agent] Cloud config fetch failed: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
         if config.get("awsEnabled"):
@@ -558,6 +814,52 @@ export MCP_USER_ID="{self.user_id}"
             else:
                 print("[Agent] AWS credential helper config missing")
 
+        # Setup PostgreSQL credentials if enabled
+        if config.get("postgresEnabled"):
+            pg_env_vars = config.get("postgresEnvVars", {})
+            if pg_env_vars:
+                print("[Agent] Setting up PostgreSQL credentials...")
+                # Install psql client (needs sudo in E2B sandbox)
+                print("[Agent] Installing PostgreSQL client (psql)...")
+                try:
+                    install_result = self.sandbox.commands.run(
+                        "sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client", 
+                        timeout=90
+                    )
+                    print(f"[Agent] psql install completed: exit_code={install_result.exit_code}")
+                    if install_result.exit_code != 0:
+                        print(f"[Agent] psql install stderr: {install_result.stderr[:200] if install_result.stderr else 'none'}")
+                except Exception as e:
+                    print(f"[Agent] psql install error: {e}")
+                
+                # Verify psql is installed
+                try:
+                    verify_result = self.sandbox.commands.run("which psql", timeout=5)
+                    psql_path = verify_result.stdout.strip()
+                    print(f"[Agent] psql location: {psql_path}")
+                    if not psql_path or "not found" in psql_path:
+                        print("[Agent] WARNING: psql not found after install")
+                except Exception as e:
+                    print(f"[Agent] WARNING: psql verification failed: {e}")
+                
+                # Write environment variables to bashrc and env_session
+                pg_env_lines = "\n".join([f'export {k}="{v}"' for k, v in pg_env_vars.items()])
+                
+                # Append to .env_session for this session
+                env_session_content = f"\n# PostgreSQL credentials\n{pg_env_lines}\n"
+                try:
+                    existing = self.sandbox.files.read("/home/user/.env_session")
+                    env_session_content = existing + env_session_content
+                except:
+                    pass
+                self.sandbox.files.write("/home/user/.env_session", env_session_content)
+                
+                # Also add to bashrc for persistence
+                self.sandbox.commands.run(
+                    f'grep -q "PGHOST" ~/.bashrc || echo \'{pg_env_lines}\' >> ~/.bashrc'
+                )
+                print(f"[Agent] PostgreSQL configured: {pg_env_vars.get('PGHOST')}:{pg_env_vars.get('PGPORT')}/{pg_env_vars.get('PGDATABASE')}")
+
     async def _setup_github_cli(self):
         """Configure GitHub CLI with a short-lived token helper."""
         if not self.sandbox or not self.backend_url:
@@ -570,6 +872,44 @@ export MCP_USER_ID="{self.user_id}"
         self.sandbox.files.write("/home/user/.local/bin/gh", GH_WRAPPER_SCRIPT)
         self.sandbox.commands.run("chmod +x /home/user/.local/bin/gh")
         self.sandbox.commands.run(GH_CLI_INSTALL_CMD)
+    
+    async def _upload_files(self):
+        """Upload pending files to sandbox."""
+        print(f"[Agent] _upload_files called, pending_files count: {len(self.pending_files) if self.pending_files else 0}")
+        if not self.sandbox or not self.pending_files:
+            return
+        
+        # Create uploads directory
+        uploads_dir = "/home/user/uploads"
+        self.sandbox.commands.run(f"mkdir -p {uploads_dir}")
+        
+        uploaded_files = []
+        for file_info in self.pending_files:
+            try:
+                name = file_info.get("name", "file")
+                data_b64 = file_info.get("data", "")
+                
+                # Decode base64 data
+                try:
+                    file_data = base64.b64decode(data_b64)
+                except Exception as e:
+                    print(f"[Agent] Failed to decode file {name}: {e}")
+                    continue
+                
+                # Write file to sandbox (E2B accepts bytes directly)
+                file_path = f"{uploads_dir}/{name}"
+                self.sandbox.files.write(file_path, file_data)
+                uploaded_files.append(file_path)
+                print(f"[Agent] Uploaded file: {file_path} ({len(file_data)} bytes)")
+                
+            except Exception as e:
+                print(f"[Agent] Failed to upload file {file_info.get('name', 'unknown')}: {e}")
+        
+        if uploaded_files:
+            print(f"[Agent] Uploaded {len(uploaded_files)} file(s) to {uploads_dir}")
+        
+        # Clear pending files after upload
+        self.pending_files = []
     
     async def cleanup(self, keep_sandbox: bool = False):
         """Clean up resources. If keep_sandbox=True, keep sandbox alive for conversation continuity."""

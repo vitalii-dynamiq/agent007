@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -231,6 +232,67 @@ func (h *Handlers) HandleStoreGCPCredentials(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// HandleStorePostgresCredentials handles storing PostgreSQL credentials
+func (h *Handlers) HandleStorePostgresCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get user ID
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		userID = "default-user"
+	}
+
+	var req struct {
+		Name     string `json:"name"`
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Database string `json:"database"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		SSLMode  string `json:"sslMode"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Host == "" || req.Database == "" || req.Username == "" {
+		http.Error(w, "host, database, and username are required", http.StatusBadRequest)
+		return
+	}
+
+	config := &PostgresCredentialConfig{
+		Host:           req.Host,
+		Port:           req.Port,
+		Database:       req.Database,
+		Username:       req.Username,
+		Password:       req.Password,
+		SSLMode:        req.SSLMode,
+		ConnectionName: req.Name,
+	}
+
+	name := req.Name
+	if name == "" {
+		name = fmt.Sprintf("PostgreSQL %s@%s", req.Database, req.Host)
+	}
+
+	if err := h.manager.StorePostgresCredentials(userID, name, config); err != nil {
+		log.Printf("Failed to store PostgreSQL credentials: %v", err)
+		http.Error(w, "Failed to store credentials", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "PostgreSQL credentials stored successfully",
+	})
+}
+
 // HandleListCredentials lists all credentials for a user
 func (h *Handlers) HandleListCredentials(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -277,6 +339,8 @@ func (h *Handlers) HandleDeleteCredentials(w http.ResponseWriter, r *http.Reques
 		providerType = ProviderAWS
 	case "gcp":
 		providerType = ProviderGCP
+	case "postgres":
+		providerType = ProviderPostgres
 	default:
 		http.Error(w, "invalid provider", http.StatusBadRequest)
 		return

@@ -90,6 +90,7 @@ func NewRouter(h *Handlers) *chi.Mux {
 			r.Get("/credentials", h.handleCloudListCredentials)
 			r.Post("/credentials/aws", h.handleCloudStoreAWSCredentials)
 			r.Post("/credentials/gcp", h.handleCloudStoreGCPCredentials)
+			r.Post("/credentials/postgres", h.handleCloudStorePostgresCredentials)
 			r.Delete("/credentials", h.handleCloudDeleteCredentials)
 
 			// Endpoint for getting sandbox credential configuration
@@ -139,6 +140,14 @@ func (h *Handlers) handleCloudStoreGCPCredentials(w http.ResponseWriter, r *http
 		return
 	}
 	h.cloudHandlers.HandleStoreGCPCredentials(w, r)
+}
+
+func (h *Handlers) handleCloudStorePostgresCredentials(w http.ResponseWriter, r *http.Request) {
+	if h.cloudHandlers == nil {
+		http.Error(w, "Cloud credentials not configured", http.StatusServiceUnavailable)
+		return
+	}
+	h.cloudHandlers.HandleStorePostgresCredentials(w, r)
 }
 
 func (h *Handlers) handleCloudDeleteCredentials(w http.ResponseWriter, r *http.Request) {

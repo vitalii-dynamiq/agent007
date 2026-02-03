@@ -757,6 +757,146 @@ SharePoint is Microsoft's enterprise collaboration platform.`,
 	},
 
 	// ============================================================================
+	// DATABASES - Direct Connection
+	// ============================================================================
+
+	"postgres": {
+		ID:           "postgres",
+		Name:         "PostgreSQL",
+		Description:  "Open-source relational database with SQL queries and analytics",
+		Category:     CategoryData,
+		Icon:         "🐘",
+		ProviderType: ProviderCLI,
+		AuthType:     AuthDatabase,
+		CLICommand:   "psql",
+		CLIInstallCmd: `apt-get update && apt-get install -y postgresql-client`,
+		AgentInstructions: `Use the PostgreSQL CLI (psql) for database operations.
+Pre-authenticated via environment variables: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD.
+
+Common commands:
+- Connect: psql (uses env vars automatically)
+- List databases: psql -c "\l"
+- List tables: psql -c "\dt"
+- Describe table: psql -c "\d tablename"
+- Run query: psql -c "SELECT * FROM table LIMIT 10"
+- Run SQL file: psql -f query.sql
+
+For interactive SQL:
+psql -c "your query here"
+
+Or use heredoc for multi-line:
+psql <<EOF
+SELECT column1, column2
+FROM table
+WHERE condition
+ORDER BY column1;
+EOF
+
+Run 'psql --help' for all options.`,
+		Capabilities: []string{"sql", "tables", "schemas", "queries", "analytics"},
+		Enabled:      true,
+	},
+
+	"mysql": {
+		ID:           "mysql",
+		Name:         "MySQL",
+		Description:  "Popular open-source relational database",
+		Category:     CategoryData,
+		Icon:         "🐬",
+		ProviderType: ProviderCLI,
+		AuthType:     AuthDatabase,
+		CLICommand:   "mysql",
+		CLIInstallCmd: `apt-get update && apt-get install -y mysql-client`,
+		AgentInstructions: `Use the MySQL CLI for database operations.
+Pre-authenticated via environment variables: MYSQL_HOST, MYSQL_TCP_PORT, MYSQL_DATABASE, MYSQL_USER, MYSQL_PWD.
+
+Common commands:
+- Connect: mysql
+- List databases: mysql -e "SHOW DATABASES"
+- List tables: mysql -e "SHOW TABLES"
+- Describe table: mysql -e "DESCRIBE tablename"
+- Run query: mysql -e "SELECT * FROM table LIMIT 10"
+
+Run 'mysql --help' for all options.`,
+		Capabilities: []string{"sql", "tables", "schemas", "queries"},
+		Enabled:      true,
+	},
+
+	"bigquery": {
+		ID:           "bigquery",
+		Name:         "BigQuery",
+		Description:  "Google Cloud serverless data warehouse",
+		Category:     CategoryData,
+		Icon:         "📊",
+		ProviderType: ProviderCLI,
+		AuthType:     AuthServiceAccount,
+		CLICommand:   "bq",
+		CLIInstallCmd: `# BigQuery CLI is part of gcloud SDK`,
+		AgentInstructions: `Use the BigQuery CLI (bq) for data warehouse operations.
+Pre-authenticated via GCP service account.
+
+Common commands:
+- List datasets: bq ls
+- List tables: bq ls dataset_name
+- Show table schema: bq show dataset.table
+- Run query: bq query "SELECT * FROM dataset.table LIMIT 10"
+- Run query with standard SQL: bq query --use_legacy_sql=false "SELECT..."
+
+Run 'bq --help' for all commands.`,
+		Capabilities: []string{"sql", "datasets", "tables", "queries", "analytics"},
+		Enabled:      true,
+	},
+
+	"sqlserver": {
+		ID:           "sqlserver",
+		Name:         "Microsoft SQL Server",
+		Description:  "Enterprise relational database from Microsoft",
+		Category:     CategoryData,
+		Icon:         "🔷",
+		ProviderType: ProviderCLI,
+		AuthType:     AuthDatabase,
+		CLICommand:   "sqlcmd",
+		CLIInstallCmd: `curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | tee /etc/apt/sources.list.d/msprod.list
+apt-get update && ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev`,
+		AgentInstructions: `Use sqlcmd for SQL Server operations.
+Pre-authenticated via environment variables: SQLCMDSERVER, SQLCMDDBNAME, SQLCMDUSER, SQLCMDPASSWORD.
+
+Common commands:
+- Run query: sqlcmd -Q "SELECT * FROM table"
+- List databases: sqlcmd -Q "SELECT name FROM sys.databases"
+- List tables: sqlcmd -Q "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES"
+
+Run 'sqlcmd -?' for all options.`,
+		Capabilities: []string{"sql", "tables", "schemas", "queries"},
+		Enabled:      true,
+	},
+
+	"vertica": {
+		ID:           "vertica",
+		Name:         "Vertica",
+		Description:  "Columnar analytics database for big data",
+		Category:     CategoryData,
+		Icon:         "📈",
+		ProviderType: ProviderCLI,
+		AuthType:     AuthDatabase,
+		CLICommand:   "vsql",
+		CLIInstallCmd: `# Vertica client requires manual installation`,
+		AgentInstructions: `Use vsql for Vertica analytics operations.
+Pre-authenticated via environment variables: VSQL_HOST, VSQL_PORT, VSQL_DATABASE, VSQL_USER, VSQL_PASSWORD.
+
+Common commands:
+- Connect: vsql
+- List schemas: vsql -c "\dn"
+- List tables: vsql -c "\dt"
+- Run query: vsql -c "SELECT * FROM table LIMIT 10"
+
+Run 'vsql --help' for all options.`,
+		Capabilities: []string{"sql", "analytics", "schemas", "projections"},
+		Enabled:      true,
+	},
+
+	// ============================================================================
 	// DATA WAREHOUSES - CLI/MCP Based
 	// ============================================================================
 

@@ -9,40 +9,15 @@
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
-function generateExternalUserId(): string {
-  if (typeof crypto !== 'undefined') {
-    if (typeof crypto.randomUUID === 'function') {
-      return `user_${crypto.randomUUID()}`
-    }
-    if (typeof crypto.getRandomValues === 'function') {
-      const bytes = new Uint8Array(16)
-      crypto.getRandomValues(bytes)
-      const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-      return `user_${hex}`
-    }
-  }
-  return `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-}
+// Static user ID for demo - ensures consistency across sessions and restarts
+const DEMO_USER_ID = 'demo_user_dynamiq'
 
-// Get the external user ID - must match the one used for OAuth connections
+// Get the external user ID - static for demo purposes
 // Exported so connect-dialog can use the same userID
 export function getExternalUserId(): string {
-  const dynamiqKey = 'dynamiq_external_user_id'
-  const legacyKey = 'manus_external_user_id'
-
-  let userId = localStorage.getItem(dynamiqKey)
-  if (!userId) {
-    const legacyUserId = localStorage.getItem(legacyKey)
-    if (legacyUserId) {
-      userId = legacyUserId
-      localStorage.setItem(dynamiqKey, legacyUserId)
-      localStorage.removeItem(legacyKey)
-    } else {
-      userId = generateExternalUserId()
-      localStorage.setItem(dynamiqKey, userId)
-    }
-  }
-  return userId
+  // Log user ID to console for debugging
+  console.log('[Dynamiq] User ID:', DEMO_USER_ID)
+  return DEMO_USER_ID
 }
 
 // Common headers for all API requests (includes ngrok header and user ID)
@@ -185,13 +160,24 @@ export const api = {
   // Messages (SSE Streaming)
   // -------------------------------------------------------------------------
   
-  sendMessage(conversationId: string, content: string, onEvent: (event: SSEEvent) => void): () => void {
+  sendMessage(
+    conversationId: string, 
+    content: string, 
+    onEvent: (event: SSEEvent) => void,
+    files?: Array<{ name: string; size: number; type: string; data: string }>
+  ): () => void {
     const controller = new AbortController()
+    
+    // Build request body with optional files
+    const body: Record<string, unknown> = { content }
+    if (files && files.length > 0) {
+      body.files = files
+    }
     
     fetch(`${API_URL}/api/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     }).then(async (res) => {
       if (!res.ok) {

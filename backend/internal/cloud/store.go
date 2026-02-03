@@ -207,6 +207,62 @@ func (s *CredentialStore) GetGCPCredentials(userID string) (*GCPCredentialConfig
 	return &config, nil
 }
 
+// StorePostgresCredentials stores PostgreSQL credentials for a user
+func (s *CredentialStore) StorePostgresCredentials(userID, name string, config *PostgresCredentialConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Encrypt the password
+	encryptedPassword, err := s.encrypt(config.Password)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt password: %w", err)
+	}
+
+	storedConfig := *config
+	storedConfig.Password = encryptedPassword
+
+	if s.credentials[userID] == nil {
+		s.credentials[userID] = make(map[ProviderType]*UserCloudCredentials)
+	}
+
+	s.credentials[userID][ProviderPostgres] = &UserCloudCredentials{
+		UserID:    userID,
+		Provider:  ProviderPostgres,
+		Name:      name,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Postgres:  &storedConfig,
+	}
+
+	return nil
+}
+
+// GetPostgresCredentials retrieves and decrypts PostgreSQL credentials
+func (s *CredentialStore) GetPostgresCredentials(userID string) (*PostgresCredentialConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	userCreds, ok := s.credentials[userID]
+	if !ok {
+		return nil, fmt.Errorf("no credentials found for user %s", userID)
+	}
+
+	creds, ok := userCreds[ProviderPostgres]
+	if !ok || creds.Postgres == nil {
+		return nil, fmt.Errorf("no PostgreSQL credentials found for user %s", userID)
+	}
+
+	// Decrypt password
+	config := *creds.Postgres
+	decrypted, err := s.decrypt(config.Password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt password: %w", err)
+	}
+	config.Password = decrypted
+
+	return &config, nil
+}
+
 // ListCredentials lists all credentials for a user (without sensitive data)
 func (s *CredentialStore) ListCredentials(userID string) []UserCloudCredentials {
 	s.mu.RLock()
@@ -244,6 +300,18 @@ func (s *CredentialStore) ListCredentials(userID string) []UserCloudCredentials 
 				ImpersonateServiceAccount: cred.GCP.ImpersonateServiceAccount,
 				Scopes:                    cred.GCP.Scopes,
 				// Don't include ServiceAccountJSON
+			}
+		}
+
+		if cred.Postgres != nil {
+			safeCred.Postgres = &PostgresCredentialConfig{
+				Host:           cred.Postgres.Host,
+				Port:           cred.Postgres.Port,
+				Database:       cred.Postgres.Database,
+				Username:       cred.Postgres.Username,
+				SSLMode:        cred.Postgres.SSLMode,
+				ConnectionName: cred.Postgres.ConnectionName,
+				// Don't include Password
 			}
 		}
 
