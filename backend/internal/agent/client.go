@@ -190,3 +190,62 @@ func (c *Client) Health(ctx context.Context) error {
 
 	return nil
 }
+
+// WarmResponse represents a response from the warm endpoint.
+type WarmResponse struct {
+	Status    string `json:"status"`
+	SandboxID string `json:"sandbox_id,omitempty"`
+	Ready     bool   `json:"ready"`
+	Message   string `json:"message,omitempty"`
+}
+
+// WarmSandbox pre-warms a sandbox for a user.
+func (c *Client) WarmSandbox(ctx context.Context, req map[string]interface{}) (*WarmResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/warm", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Short timeout for warming - we don't wait for completion
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result WarmResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// WarmSandboxStatus checks the status of a warm sandbox.
+func (c *Client) WarmSandboxStatus(ctx context.Context, userID string) (*WarmResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/warm/status/"+userID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result WarmResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &result, nil
+}

@@ -8,6 +8,7 @@ import { User, Bot, Wrench, Loader2, ChevronRight, CheckCircle2, XCircle, Clock,
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { VegaChart, parseVegaSpec } from './vega-chart'
+import { MermaidDiagram } from './mermaid-diagram'
 
 interface MessageProps {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -96,6 +97,11 @@ function MarkdownContent({ content }: { content: string }) {
           const vegaSpec = parseVegaSpec(codeContent, language)
           if (vegaSpec) {
             return <VegaChart spec={vegaSpec} />
+          }
+
+          // Render Mermaid diagrams
+          if (language === 'mermaid') {
+            return <MermaidDiagram code={codeContent} />
           }
 
           // Regular code block with syntax highlighting

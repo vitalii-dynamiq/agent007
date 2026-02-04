@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -174,6 +176,10 @@ func NewHandlers(cfg *config.Config) (*Handlers, error) {
 	// Set cloud manager for database credential storage
 	if cloudManager != nil {
 		integrationHandlers.SetCloudManager(&cloudManagerAdapter{cloudManager})
+		
+		// Sync existing PostgreSQL credentials from integrations to cloud manager
+		// This ensures credentials persist across backend restarts
+		syncPostgresCredentials(integrationRegistry, cloudManager)
 	}
 	log.Printf("Integration registry initialized with %d available integrations", len(integrations.GetEnabledIntegrations()))
 
@@ -936,4 +942,194 @@ func (a *cloudManagerAdapter) StorePostgresCredentials(userID, name string, conf
 		return a.manager.StorePostgresCredentials(userID, name, pgConfig)
 	}
 	return fmt.Errorf("invalid config type")
+}
+
+// syncPostgresCredentials syncs PostgreSQL credentials from integrations DB to cloud manager
+// This ensures credentials persist across backend restarts since cloud manager is in-memory
+func syncPostgresCredentials(registry *integrations.Registry, manager *cloud.Manager) {
+	// Get all users with PostgreSQL integration enabled
+	userIntegrations := registry.GetAllUserIntegrations("postgres")
+	synced := 0
+	
+	for userID, ui := range userIntegrations {
+		if ui.DatabaseConfig != nil {
+			pgConfig := &cloud.PostgresCredentialConfig{
+				Host:           ui.DatabaseConfig.Host,
+				Port:           ui.DatabaseConfig.Port,
+				Database:       ui.DatabaseConfig.Database,
+				Username:       ui.DatabaseConfig.Username,
+				Password:       ui.DatabaseConfig.Password,
+				SSLMode:        ui.DatabaseConfig.SSLMode,
+				ConnectionName: ui.AccountName,
+			}
+			if err := manager.StorePostgresCredentials(userID, ui.AccountName, pgConfig); err != nil {
+				log.Printf("Warning: Failed to sync PostgreSQL credentials for user %s: %v", userID, err)
+			} else {
+				synced++
+			}
+		}
+	}
+	
+	if synced > 0 {
+		log.Printf("Synced PostgreSQL credentials for %d users from integrations DB", synced)
+	}
+}
+
+// TranscribeAudio transcribes audio using OpenAI's speech-to-text API
+func (h *Handlers) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
+	// Parse multipart form
+	err := r.ParseMultipartForm(32 << 20) // 32MB max
+	if err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	// Get the audio file
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No audio file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	log.Printf("[Transcribe] Received audio file: %s, size: %d bytes", header.Filename, header.Size)
+
+	// Read file content
+	audioData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read audio file", http.StatusInternalServerError)
+		return
+	}
+
+	// Create multipart request for OpenAI
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Add the file
+	part, err := writer.CreateFormFile("file", header.Filename)
+	if err != nil {
+		http.Error(w, "Failed to create form", http.StatusInternalServerError)
+		return
+	}
+	_, err = part.Write(audioData)
+	if err != nil {
+		http.Error(w, "Failed to write audio data", http.StatusInternalServerError)
+		return
+	}
+
+	// Add the model - use gpt-4o-transcribe for best accuracy
+	_ = writer.WriteField("model", "gpt-4o-transcribe")
+	
+	// Add response format
+	_ = writer.WriteField("response_format", "json")
+
+	writer.Close()
+
+	// Make request to OpenAI
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/audio/transcriptions", &buf)
+	if err != nil {
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+h.config.LLMAPIKey)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[Transcribe] OpenAI request failed: %v", err)
+		http.Error(w, "Transcription request failed", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read response", http.StatusInternalServerError)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[Transcribe] OpenAI error: %s", string(body))
+		http.Error(w, "Transcription failed: "+string(body), resp.StatusCode)
+		return
+	}
+
+	log.Printf("[Transcribe] Success, response: %s", string(body))
+
+	// Forward the response
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// WarmSandbox pre-warms a sandbox for faster first message response
+func (h *Handlers) WarmSandbox(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		userID = "demo_user"
+	}
+
+	// Get session token
+	sessionToken, err := h.tokenManager.GenerateSessionToken(userID, "", "")
+	if err != nil {
+		log.Printf("[WarmSandbox] Failed to create session token: %v", err)
+		http.Error(w, "Failed to create session token", http.StatusInternalServerError)
+		return
+	}
+
+	// Build MCP proxy URL
+	mcpProxyURL := h.config.BackendURL + "/api/mcp/proxy"
+
+	// Forward request to Python agent
+	agentReq := map[string]interface{}{
+		"user_id":       userID,
+		"session_token": sessionToken,
+		"mcp_proxy_url": mcpProxyURL,
+	}
+
+	reqBody, _ := json.Marshal(agentReq)
+
+	log.Printf("[WarmSandbox] Warming sandbox for user %s", userID)
+
+	resp, err := h.agentClient.WarmSandbox(r.Context(), agentReq)
+	if err != nil {
+		log.Printf("[WarmSandbox] Agent request failed: %v", err)
+		// Return success anyway - warming is best-effort
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "warming",
+			"message": "Sandbox warming initiated",
+		})
+		return
+	}
+
+	// Forward response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+	_ = reqBody // suppress unused warning
+}
+
+// WarmSandboxStatus checks the status of a warm sandbox
+func (h *Handlers) WarmSandboxStatus(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		userID = "demo_user"
+	}
+
+	resp, err := h.agentClient.WarmSandboxStatus(r.Context(), userID)
+	if err != nil {
+		log.Printf("[WarmSandboxStatus] Agent request failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "none",
+			"ready":  false,
+		})
+		return
+	}
+
+	// Forward response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

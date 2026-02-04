@@ -10,8 +10,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { Menu, X, Settings } from 'lucide-react'
 import { ConversationList } from '@/components/sidebar/conversation-list'
 import { ChatView } from '@/components/chat/chat-view'
-import { IntegrationsPanel } from '@/components/integrations/integrations-panel'
+import { type UploadedFile } from '@/components/chat/message-input'
+import { SettingsPanel } from '@/components/settings-panel'
 import { Button } from '@/components/ui/button'
+import { DynamiqLogo } from '@/components/ui/logo'
 import { api, type Conversation } from '@/lib/api'
 
 function App() {
@@ -37,8 +39,20 @@ function App() {
   }, [])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch
+    // Load conversations
     loadConversations()
+    
+    // Pre-warm sandbox for faster first message
+    // This runs in the background and is best-effort
+    api.warmSandbox().then((result) => {
+      if (result.ready) {
+        console.log('[App] Sandbox already warm:', result.sandbox_id)
+      } else {
+        console.log('[App] Sandbox warming started')
+      }
+    }).catch((err) => {
+      console.warn('[App] Failed to warm sandbox:', err)
+    })
   }, [loadConversations])
 
   // Close mobile sidebar when selecting a conversation
@@ -83,6 +97,21 @@ function App() {
     }
   }, [selectedId])
 
+  // Create conversation and return it - ChatView will handle sending the message
+  const handleCreateAndSend = useCallback(async (_content: string, _files?: UploadedFile[]): Promise<Conversation> => {
+    const conv = await api.createConversation()
+    setConversations((prev) => [conv, ...prev])
+    setSelectedId(conv.id)
+    setShowMobileSidebar(false)
+    return conv
+  }, [])
+
+  // Reset to new chat state
+  const handleNewChat = useCallback(() => {
+    setSelectedId(undefined)
+    setShowMobileSidebar(false)
+  }, [])
+
   const selectedConversation = conversations.find((c) => c.id === selectedId)
 
   return (
@@ -97,7 +126,13 @@ function App() {
         >
           {showMobileSidebar ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
-        <h1 className="font-bold">Dynamiq</h1>
+        <button 
+          onClick={handleNewChat}
+          className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+        >
+          <DynamiqLogo size="sm" />
+          <span className="font-bold">Dynamiq</span>
+        </button>
         <Button
           variant="ghost"
           size="icon"
@@ -128,8 +163,14 @@ function App() {
         <div className="flex h-full flex-col">
           {/* Desktop Header */}
           <div className="hidden border-b p-4 md:block">
-            <h1 className="font-bold text-lg">Dynamiq</h1>
-            <p className="text-xs text-muted-foreground">Your AI-Powered Data Analyst</p>
+            <button 
+              onClick={handleNewChat}
+              className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
+            >
+              <DynamiqLogo size="md" />
+              <h1 className="font-bold text-lg">Dynamiq</h1>
+            </button>
+            <p className="text-xs text-muted-foreground mt-1">Your AI-Powered Data Analyst</p>
           </div>
           
           {/* Conversation List */}
@@ -155,8 +196,10 @@ function App() {
               }}
             >
               <Settings className="mr-2 h-4 w-4" />
-              Integrations
-              <span className="ml-auto text-xs text-muted-foreground">35</span>
+              Settings
+              <span className="ml-auto text-xs text-muted-foreground/50">
+                Integrations & Skills
+              </span>
             </Button>
           </div>
         </div>
@@ -170,17 +213,19 @@ function App() {
             <ChatView
               conversation={selectedConversation || null}
               onConversationUpdate={handleConversationUpdate}
+              onManageIntegrations={() => setShowIntegrations(true)}
+              onCreateAndSend={handleCreateAndSend}
             />
           </div>
 
         </div>
       </div>
 
-      {/* Integrations Panel - Full Screen Modal for all devices */}
+      {/* Settings Panel - Full Screen Modal for all devices */}
       {showIntegrations && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-4xl h-[90vh] bg-background rounded-lg shadow-xl overflow-hidden m-4">
-            <IntegrationsPanel onClose={() => setShowIntegrations(false)} />
+            <SettingsPanel onClose={() => setShowIntegrations(false)} />
           </div>
         </div>
       )}

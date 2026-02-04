@@ -8,6 +8,7 @@ Supports SSE streaming for real-time events.
 import os
 import json
 import asyncio
+import time
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -22,12 +23,46 @@ from main import DynamiqAgent
 load_dotenv()
 
 
+# Warm sandbox pool - stores pre-warmed sandboxes per user
+# Key: user_id, Value: {"sandbox_id": str, "agent": DynamiqAgent, "created_at": float, "ready": bool}
+warm_sandbox_pool: dict[str, dict] = {}
+warm_sandbox_lock = asyncio.Lock()
+
+# How long to keep warm sandboxes (25 minutes, slightly less than E2B timeout)
+WARM_SANDBOX_TTL = 25 * 60
+
+
+async def cleanup_expired_sandboxes():
+    """Clean up expired warm sandboxes."""
+    async with warm_sandbox_lock:
+        now = time.time()
+        expired = [uid for uid, info in warm_sandbox_pool.items() 
+                   if now - info["created_at"] > WARM_SANDBOX_TTL]
+        for uid in expired:
+            print(f"[Server] Cleaning up expired warm sandbox for user {uid}")
+            try:
+                agent = warm_sandbox_pool[uid].get("agent")
+                if agent:
+                    await agent.cleanup(keep_sandbox=False)
+            except Exception as e:
+                print(f"[Server] Error cleaning up sandbox: {e}")
+            del warm_sandbox_pool[uid]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """App lifespan."""
     print("[Server] Starting Dynamiq Agent server...")
     yield
     print("[Server] Shutting down...")
+    # Cleanup all warm sandboxes on shutdown
+    for uid, info in warm_sandbox_pool.items():
+        try:
+            agent = info.get("agent")
+            if agent:
+                await agent.cleanup(keep_sandbox=False)
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -79,10 +114,136 @@ class RunResponse(BaseModel):
     sandbox_id: str | None = None
 
 
+class WarmRequest(BaseModel):
+    """Request to pre-warm a sandbox."""
+    user_id: str
+    session_token: str
+    mcp_proxy_url: str | None = None
+
+
+class WarmResponse(BaseModel):
+    """Response from warm endpoint."""
+    status: str
+    sandbox_id: str | None = None
+    ready: bool = False
+    message: str | None = None
+
+
 @app.get("/health")
 async def health():
     """Health check."""
     return {"status": "ok", "service": "dynamiq-agent"}
+
+
+@app.post("/warm", response_model=WarmResponse)
+async def warm_sandbox(req: WarmRequest):
+    """
+    Pre-warm a sandbox for a user.
+    
+    This creates and fully initializes a sandbox in the background,
+    so when the user sends their first message, it's ready immediately.
+    """
+    # Clean up expired sandboxes first
+    await cleanup_expired_sandboxes()
+    
+    async with warm_sandbox_lock:
+        # Check if we already have a warm sandbox for this user
+        if req.user_id in warm_sandbox_pool:
+            info = warm_sandbox_pool[req.user_id]
+            if info.get("ready"):
+                print(f"[Server] Warm sandbox already ready for user {req.user_id}: {info['sandbox_id']}")
+                return WarmResponse(
+                    status="ready",
+                    sandbox_id=info["sandbox_id"],
+                    ready=True,
+                    message="Sandbox already warmed and ready"
+                )
+            else:
+                print(f"[Server] Warm sandbox still initializing for user {req.user_id}")
+                return WarmResponse(
+                    status="warming",
+                    sandbox_id=info.get("sandbox_id"),
+                    ready=False,
+                    message="Sandbox is being initialized"
+                )
+        
+        # Mark as warming (not ready yet)
+        warm_sandbox_pool[req.user_id] = {
+            "sandbox_id": None,
+            "agent": None,
+            "created_at": time.time(),
+            "ready": False,
+        }
+    
+    # Start warming in background (outside lock)
+    asyncio.create_task(_do_warm_sandbox(req))
+    
+    return WarmResponse(
+        status="warming",
+        sandbox_id=None,
+        ready=False,
+        message="Sandbox warming started"
+    )
+
+
+async def _do_warm_sandbox(req: WarmRequest):
+    """Background task to warm a sandbox."""
+    try:
+        print(f"[Server] Starting sandbox warm-up for user {req.user_id}")
+        
+        agent = DynamiqAgent(
+            user_id=req.user_id,
+            session_token=req.session_token,
+            mcp_proxy_url=req.mcp_proxy_url or "",
+            conversation_id="",  # No conversation yet
+            sandbox_id=None,
+            messages=None,
+            files=None,
+        )
+        
+        # Setup the sandbox (this does all the initialization)
+        sandbox_id = await agent.setup()
+        
+        # Update the pool
+        async with warm_sandbox_lock:
+            if req.user_id in warm_sandbox_pool:
+                warm_sandbox_pool[req.user_id].update({
+                    "sandbox_id": sandbox_id,
+                    "agent": agent,
+                    "ready": True,
+                })
+                print(f"[Server] Sandbox warmed successfully for user {req.user_id}: {sandbox_id}")
+            else:
+                # User was removed from pool (maybe expired), cleanup
+                print(f"[Server] User {req.user_id} no longer in pool, cleaning up sandbox")
+                await agent.cleanup(keep_sandbox=False)
+                
+    except Exception as e:
+        print(f"[Server] Error warming sandbox for user {req.user_id}: {e}")
+        async with warm_sandbox_lock:
+            if req.user_id in warm_sandbox_pool:
+                del warm_sandbox_pool[req.user_id]
+
+
+@app.get("/warm/status/{user_id}")
+async def warm_status(user_id: str):
+    """Check status of a warm sandbox for a user."""
+    # Simple non-blocking check
+    if user_id not in warm_sandbox_pool:
+        return WarmResponse(
+            status="none",
+            sandbox_id=None,
+            ready=False,
+            message="No warm sandbox for this user"
+        )
+    
+    info = warm_sandbox_pool[user_id]
+    return WarmResponse(
+        status="ready" if info["ready"] else "warming",
+        sandbox_id=info.get("sandbox_id"),
+        ready=info["ready"],
+        message="Sandbox ready" if info["ready"] else "Sandbox still initializing"
+    )
 
 
 @app.post("/run", response_model=RunResponse)
@@ -146,15 +307,36 @@ async def run_agent_stream(req: RunRequest):
         else:
             print("[Server] No files in request")
         
-        agent = DynamiqAgent(
-            user_id=req.user_id,
-            session_token=req.session_token,
-            mcp_proxy_url=req.mcp_proxy_url or "",
-            conversation_id=req.conversation_id or "",
-            sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
-            files=files,  # Pass uploaded files
-            messages=messages,  # Pass conversation history
-        )
+        # Check if we have a warm sandbox for this user
+        warm_agent = None
+        warm_sandbox_id = None
+        async with warm_sandbox_lock:
+            if req.user_id in warm_sandbox_pool and warm_sandbox_pool[req.user_id].get("ready"):
+                warm_info = warm_sandbox_pool.pop(req.user_id)  # Take ownership
+                warm_agent = warm_info.get("agent")
+                warm_sandbox_id = warm_info.get("sandbox_id")
+                print(f"[Server] Using warm sandbox for user {req.user_id}: {warm_sandbox_id}")
+        
+        # Use warm agent if available, otherwise create new
+        if warm_agent and warm_sandbox_id and not req.sandbox_id:
+            # Update the warm agent with conversation-specific data
+            warm_agent.conversation_id = req.conversation_id or ""
+            warm_agent.pending_files = files or []  # Correct attribute name
+            warm_agent.messages_history = messages or []  # Correct attribute name
+            agent = warm_agent
+            sandbox_id = warm_sandbox_id
+            using_warm = True
+        else:
+            agent = DynamiqAgent(
+                user_id=req.user_id,
+                session_token=req.session_token,
+                mcp_proxy_url=req.mcp_proxy_url or "",
+                conversation_id=req.conversation_id or "",
+                sandbox_id=req.sandbox_id,  # Pass existing sandbox ID
+                files=files,  # Pass uploaded files
+                messages=messages,  # Pass conversation history
+            )
+            using_warm = False
         
         # Queue for collecting events from agent
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -174,19 +356,33 @@ async def run_agent_stream(req: RunRequest):
                 print(f"[Server] Event queue error: {e}")
         
         try:
-            # Status: Creating or reconnecting to sandbox
-            if req.sandbox_id:
-                yield sse_event("status", {"message": "Reconnecting to sandbox..."})
+            # Setup sandbox (skip if using warm sandbox)
+            if using_warm:
+                # Upload any files to the warm sandbox
+                if files:
+                    yield sse_event("status", {"message": "Uploading files..."})
+                    await agent._upload_files()
+                yield sse_event("status", {
+                    "message": "Ready",
+                    "sandbox_id": sandbox_id,
+                    "reused": True,
+                    "warm": True
+                })
+            elif req.sandbox_id:
+                sandbox_id = await agent.setup()
+                yield sse_event("status", {
+                    "message": "Ready",
+                    "sandbox_id": sandbox_id,
+                    "reused": req.sandbox_id is not None and req.sandbox_id == sandbox_id
+                })
             else:
-                yield sse_event("status", {"message": "Creating sandbox..."})
-            
-            # Setup sandbox (will reuse existing if sandbox_id provided)
-            sandbox_id = await agent.setup()
-            yield sse_event("status", {
-                "message": "Sandbox ready",
-                "sandbox_id": sandbox_id,
-                "reused": req.sandbox_id is not None and req.sandbox_id == sandbox_id
-            })
+                yield sse_event("status", {"message": "Preparing..."})
+                sandbox_id = await agent.setup()
+                yield sse_event("status", {
+                    "message": "Ready",
+                    "sandbox_id": sandbox_id,
+                    "reused": False
+                })
             
             # Run agent in background task
             async def run_agent_task():

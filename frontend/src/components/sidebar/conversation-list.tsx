@@ -29,7 +29,7 @@ export function ConversationList({
       </div>
       
       <ScrollArea className="flex-1 px-2">
-        <div className="space-y-1 pb-4">
+        <div className="space-y-1 pb-4 w-full">
           {conversations.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               No conversations yet
@@ -39,26 +39,26 @@ export function ConversationList({
               <div
                 key={conv.id}
                 className={cn(
-                  "group flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent cursor-pointer",
+                  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
+                  "transition-colors hover:bg-accent cursor-pointer",
+                  "w-full",
                   selectedId === conv.id && "bg-accent"
                 )}
                 onClick={() => onSelect(conv.id)}
               >
                 <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">
+                <span className="flex-1 truncate min-w-0">
                   {conv.title || 'New conversation'}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                <button
+                  className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation()
                     onDelete(conv.id)
                   }}
                 >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))
           )}

@@ -70,7 +70,7 @@ export interface Integration {
   category: string
   icon: string
   providerType: 'cli' | 'cloud_cli' | 'mcp' | 'direct_mcp' | 'api'
-  authType: 'oauth2' | 'api_key' | 'token' | 'iam_role' | 'service_account' | 'aws_access_key' | 'github_app'
+  authType: 'oauth2' | 'api_key' | 'token' | 'iam_role' | 'service_account' | 'aws_access_key' | 'github_app' | 'database'
   mcpProvider?: string
   mcpAppSlug?: string
   capabilities: string[]
@@ -374,5 +374,84 @@ export const api = {
     const res = await fetch(`${API_URL}/api/mcp/providers`, { headers: getHeaders(false) })
     if (!res.ok) throw new Error('Failed to get MCP providers')
     return res.json()
+  },
+
+  /**
+   * Transcribe audio using OpenAI's speech-to-text API
+   * @param audioBlob - The audio blob to transcribe
+   * @returns The transcription result
+   */
+  async transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
+    const formData = new FormData()
+    formData.append('file', audioBlob, 'recording.webm')
+    
+    const res = await fetch(`${API_URL}/api/transcribe`, {
+      method: 'POST',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        'X-User-ID': getExternalUserId(),
+        // Note: Don't set Content-Type for FormData - browser sets it with boundary
+      },
+      body: formData,
+    })
+    
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '')
+      throw new Error(errorText || 'Transcription failed')
+    }
+    
+    return res.json()
+  },
+
+  /**
+   * Pre-warm a sandbox for faster first message response
+   */
+  async warmSandbox(): Promise<{ status: string; sandbox_id?: string; ready: boolean; message?: string }> {
+    console.log('[Dynamiq] Pre-warming sandbox...')
+    try {
+      const res = await fetch(`${API_URL}/api/sandbox/warm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+          'X-User-ID': getExternalUserId(),
+        },
+      })
+      
+      if (!res.ok) {
+        console.warn('[Dynamiq] Warm sandbox request failed:', res.status)
+        return { status: 'error', ready: false }
+      }
+      
+      const result = await res.json()
+      console.log('[Dynamiq] Warm sandbox response:', result)
+      return result
+    } catch (err) {
+      console.warn('[Dynamiq] Warm sandbox error:', err)
+      return { status: 'error', ready: false }
+    }
+  },
+
+  /**
+   * Check status of warm sandbox
+   */
+  async warmSandboxStatus(): Promise<{ status: string; sandbox_id?: string; ready: boolean; message?: string }> {
+    try {
+      const res = await fetch(`${API_URL}/api/sandbox/warm/status`, {
+        method: 'GET',
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+          'X-User-ID': getExternalUserId(),
+        },
+      })
+      
+      if (!res.ok) {
+        return { status: 'error', ready: false }
+      }
+      
+      return res.json()
+    } catch (err) {
+      return { status: 'error', ready: false }
+    }
   },
 }

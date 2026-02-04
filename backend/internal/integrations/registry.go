@@ -302,6 +302,21 @@ func (r *Registry) generateSystemPrompt(ctx *AgentContext) string {
 	return sb.String()
 }
 
+// GetAllUserIntegrations returns all user integrations for a specific integration ID
+// across all users. Used for syncing credentials on startup.
+func (r *Registry) GetAllUserIntegrations(integrationID string) map[string]*UserIntegration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	
+	result := make(map[string]*UserIntegration)
+	for userID, userIntegrations := range r.userIntegrations {
+		if ui, ok := userIntegrations[integrationID]; ok && ui != nil {
+			result[userID] = ui
+		}
+	}
+	return result
+}
+
 // GenerateSandboxConfig generates sandbox configuration for a user's integrations
 func (r *Registry) GenerateSandboxConfig(userID string) ([]*SandboxConfig, error) {
 	integrations := r.GetEnabledIntegrationsForUser(userID)

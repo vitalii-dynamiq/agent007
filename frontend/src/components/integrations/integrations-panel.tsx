@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { X, Check, Loader2, ExternalLink, Search, ChevronDown, ChevronRight } from 'lucide-react'
+import { X, Check, Loader2, Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -144,20 +144,20 @@ export function IntegrationsPanel({ onClose }: IntegrationsPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div>
-          <h3 className="font-semibold">Integrations</h3>
-          <p className="text-xs text-muted-foreground">
-            {integrations.length} available
-          </p>
-        </div>
-        {onClose && (
+      {/* Header - only show if standalone */}
+      {onClose && (
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h3 className="font-semibold">Integrations</h3>
+            <p className="text-xs text-muted-foreground">
+              {integrations.length} available
+            </p>
+          </div>
           <Button variant="ghost" size="icon" onClick={onClose} className="cursor-pointer">
             <X className="h-4 w-4" />
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="border-b px-4 py-2">
@@ -217,19 +217,6 @@ export function IntegrationsPanel({ onClose }: IntegrationsPanelProps) {
           })}
         </div>
       </ScrollArea>
-
-      {/* Footer */}
-      <div className="border-t p-3">
-        <a
-          href="https://e2b.dev/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          <ExternalLink className="h-3 w-3" />
-          View documentation
-        </a>
-      </div>
 
       {/* Connect Dialog */}
       {dialogIntegration && (

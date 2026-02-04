@@ -153,7 +153,7 @@ export function ConnectDialog({ integration, onClose, onSuccess }: ConnectDialog
           if (!dbUsername.trim()) throw new Error('Username is required')
           data = { 
             host: dbHost.trim(),
-            port: parseInt(dbPort.trim() || '5432', 10),
+            port: dbPort.trim() || '5432',
             database: dbDatabase.trim(),
             username: dbUsername.trim(),
             password: dbPassword,

@@ -69,6 +69,13 @@ func NewRouter(h *Handlers) *chi.Mux {
 		// Apps (legacy - use /integrations instead)
 		r.Get("/apps", h.ListConnectedApps)
 
+		// Audio transcription
+		r.Post("/transcribe", h.TranscribeAudio)
+
+		// Sandbox pre-warming
+		r.Post("/sandbox/warm", h.WarmSandbox)
+		r.Get("/sandbox/warm/status", h.WarmSandboxStatus)
+
 		// Integrations - unified service management
 		r.Route("/integrations", func(r chi.Router) {
 			r.Get("/", h.handleListIntegrations)           // List all integrations with status

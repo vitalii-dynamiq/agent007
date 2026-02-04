@@ -356,16 +356,16 @@ PostgreSQL is accessed via the **`psql` CLI** (NOT via MCP). Credentials are pre
 psql -c "SELECT version();"
 
 # List databases
-psql -c "\l"
+psql -c "\\l"
 
 # List tables in current database
-psql -c "\dt"
+psql -c "\\dt"
 
 # List tables in a specific schema
-psql -c "\dt sales.*"
+psql -c "\\dt sales.*"
 
 # Describe a table
-psql -c "\d tablename"
+psql -c "\\d tablename"
 
 # Run a query
 psql -c "SELECT * FROM table LIMIT 10"
@@ -389,13 +389,13 @@ EOF
 When connected to a PostgreSQL database, always discover what's available first:
 ```bash
 # List all schemas
-psql -c "\dn"
+psql -c "\\dn"
 
 # List all tables in all schemas
-psql -c "\dt *.*"
+psql -c "\\dt *.*"
 
 # Describe a specific table
-psql -c "\d schema.tablename"
+psql -c "\\d schema.tablename"
 
 # Get column info
 psql -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position;"
@@ -435,12 +435,107 @@ pdftotext /home/user/uploads/document.pdf -
 python3 -c "import subprocess; print(subprocess.run(['pdftotext', '/home/user/uploads/document.pdf', '-'], capture_output=True, text=True).stdout)"
 ```
 
+## Returning Files to User
+
+When you generate a file that the user should download or view, use the `return_file` tool:
+
+```
+Use return_file with:
+- path: The file path in the sandbox (e.g., /home/user/report.csv)
+- description: Brief description of what the file contains
+```
+
+**Images will be displayed inline** in the chat. Use this for:
+- Charts generated with matplotlib, seaborn, or plotly
+- Diagrams generated with graphviz
+- Any PNG, JPG, SVG, or other image files
+
+**Example: Generate and return a chart:**
+```python
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Create chart
+plt.figure(figsize=(10, 6))
+plt.bar(['A', 'B', 'C'], [10, 20, 15])
+plt.title('Sample Chart')
+plt.savefig('/home/user/chart.png', dpi=150, bbox_inches='tight')
+plt.close()
+```
+Then call: `return_file(path="/home/user/chart.png", description="Sample bar chart")`
+
+**PDFs can be opened in browser.** Use for reports:
+```python
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+
+c = canvas.Canvas("/home/user/report.pdf", pagesize=letter)
+c.drawString(100, 750, "Report Title")
+c.save()
+```
+
+**Available visualization tools:**
+- `matplotlib` / `seaborn` - Static charts and plots
+- `plotly` + `kaleido` - Interactive charts (export to PNG/SVG)
+- `graphviz` - Diagrams and flowcharts (use `dot` command)
+- `pillow` - Image manipulation
+- `reportlab` - PDF generation
+- `imagemagick` - Image conversion (`convert` command)
+
+## Mermaid Diagrams
+
+You can create mermaid diagrams directly in your response using markdown code blocks. The UI will render them automatically.
+
+**CRITICAL SYNTAX RULES - MUST FOLLOW:**
+1. **NEVER use pipe characters (|) inside node labels** - they break parsing
+2. **NEVER use angle brackets (<>) inside labels** - use ‹› or omit them
+3. **Use · (middle dot) or - (dash) as separators** instead of |
+4. **Use \\n for line breaks** within labels
+5. **Keep labels simple** - avoid special characters
+
+**CORRECT Examples:**
+
+```mermaid
+flowchart TB
+    A[EKS Cluster · us-east-1]
+    B[Node Group: system\\n2 instances]
+    C[Service: API\\nPort 8080]
+    A --> B
+    B --> C
+```
+
+```mermaid
+flowchart LR
+    subgraph VPC[VPC - Production]
+        S1[Subnet 1\\n10.0.1.0/24]
+        S2[Subnet 2\\n10.0.2.0/24]
+    end
+    IGW[Internet Gateway] --> VPC
+```
+
+**WRONG - These will FAIL:**
+```
+A[EKS | K8s 1.29 | ACTIVE]    ❌ pipes break parsing
+B[Status: <running>]           ❌ angle brackets break parsing  
+C[Node|Group]                  ❌ any pipe in label fails
+```
+
+**For complex infrastructure diagrams**, prefer generating an image with Python/matplotlib/graphviz instead of mermaid, then use `return_file` to send it back.
+
+**Supported diagram types:**
+- `flowchart` / `graph` - Flowcharts (use TB, LR, RL, BT for direction)
+- `sequenceDiagram` - Sequence diagrams
+- `classDiagram` - Class diagrams
+- `erDiagram` - Entity relationship diagrams
+- `pie` - Pie charts
+
 ## Important Notes
 
 - **GitHub uses `gh` CLI**, not MCP
 - **Always check tool schemas** with `mcp list-tools <app>` before calling - each tool has specific parameters
 - Always check connected apps with `mcp list-apps` before trying to use them
 - **Always check `/home/user/uploads/`** when user mentions uploaded files - do not assume it's empty
+- **Use `return_file`** to send generated files to the user for download
 - The sandbox is isolated - changes don't affect the user's system
 - Be efficient: combine related commands when possible
 - Show clear, formatted results to the user
@@ -503,6 +598,27 @@ TOOLS = [
                     "path": {
                         "type": "string",
                         "description": "File path to read"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "return_file",
+            "description": "Return a file to the user for download. Use this when the user needs to download a generated file (CSV, Excel, image, PDF, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file in the sandbox to return to the user"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Brief description of what the file contains"
                     }
                 },
                 "required": ["path"]
@@ -703,9 +819,10 @@ export MCP_USER_ID="{self.user_id}"
         print("[Agent] Creating new E2B sandbox...")
         
         # Create sandbox with environment variables using Sandbox.create()
+        # Timeout of 30 minutes (1800 seconds) to keep sandbox alive for demos
         self.sandbox = await asyncio.to_thread(
             Sandbox.create,
-            timeout=600,  # 10 minutes
+            timeout=1800,  # 30 minutes - keeps sandbox alive longer for demos
             envs={
                 "MCP_PROXY_URL": self.mcp_proxy_url,
                 "MCP_SESSION_TOKEN": self.session_token,
@@ -736,16 +853,62 @@ export MCP_USER_ID="{self.user_id}"
         return self.sandbox.sandbox_id
     
     async def _install_data_packages(self):
-        """Install common data science packages in the sandbox."""
-        print("[Agent] Installing data science packages...")
+        """Install common data science and visualization packages in the sandbox."""
+        print("[Agent] Installing data science and visualization packages...")
+        
+        # Install Python packages for data analysis and visualization
+        packages = [
+            "pandas",           # Data manipulation
+            "numpy",            # Numerical computing
+            "scipy",            # Scientific computing
+            "psycopg2-binary",  # PostgreSQL driver
+            "openpyxl",         # Excel read/write
+            "xlsxwriter",       # Excel writing with charts
+            "matplotlib",       # Plotting
+            "seaborn",          # Statistical visualization
+            "pillow",           # Image processing
+            "reportlab",        # PDF generation
+            "pdfplumber",       # PDF text extraction
+            "plotly",           # Interactive charts
+            "kaleido",          # Plotly static image export
+        ]
+        
         result = self.sandbox.commands.run(
-            "pip install -q pandas numpy scipy psycopg2-binary openpyxl",
-            timeout=120  # Allow more time for package installation
+            f"pip install -q {' '.join(packages)}",
+            timeout=180  # Allow more time for package installation
         )
         if result.exit_code == 0:
-            print("[Agent] Data science packages installed successfully")
+            print("[Agent] Python packages installed successfully")
         else:
-            print(f"[Agent] Warning: Package installation had issues: {result.stderr}")
+            print(f"[Agent] Warning: Python package installation had issues: {result.stderr}")
+        
+        # Install system tools for image/diagram generation and database clients
+        # Try simple approach first - just run apt-get directly
+        print("[Agent] Installing system tools (including psql)...")
+        try:
+            # Simple apt-get install - the E2B sandbox should handle this
+            apt_cmd = "sudo apt-get update -qq && sudo apt-get install -y postgresql-client graphviz imagemagick poppler-utils fonts-liberation"
+            sys_result = self.sandbox.commands.run(apt_cmd, timeout=300)
+            if sys_result.exit_code == 0:
+                print("[Agent] System tools installed successfully")
+                # Verify psql is available
+                verify = self.sandbox.commands.run("which psql")
+                if verify.stdout.strip():
+                    print(f"[Agent] psql installed at: {verify.stdout.strip()}")
+                else:
+                    print("[Agent] Warning: psql not found after installation")
+            else:
+                error_msg = sys_result.stderr[:500] if sys_result.stderr else sys_result.stdout[:500] if sys_result.stdout else 'unknown'
+                print(f"[Agent] Warning: System tools installation failed (exit {sys_result.exit_code}): {error_msg}")
+                # Try alternative: just install psql
+                print("[Agent] Trying to install just postgresql-client...")
+                psql_result = self.sandbox.commands.run("sudo apt-get install -y postgresql-client", timeout=120)
+                if psql_result.exit_code == 0:
+                    print("[Agent] postgresql-client installed")
+                else:
+                    print(f"[Agent] postgresql-client also failed: {psql_result.stderr[:200] if psql_result.stderr else 'unknown'}")
+        except Exception as e:
+            print(f"[Agent] Exception during system tools installation: {e}")
     
     async def _install_mcp_cli(self):
         """Upload MCP CLI script to sandbox."""
@@ -822,10 +985,18 @@ export MCP_USER_ID="{self.user_id}"
                 # Install psql client (needs sudo in E2B sandbox)
                 print("[Agent] Installing PostgreSQL client (psql)...")
                 try:
-                    install_result = self.sandbox.commands.run(
-                        "sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client", 
-                        timeout=90
-                    )
+                    # Clean up apt locks and install psql
+                    psql_install_cmd = """
+                        # Wait for any running apt processes
+                        while fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+                            sleep 2
+                        done
+                        # Remove stale locks
+                        sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null || true
+                        # Install postgresql-client
+                        sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+                    """
+                    install_result = self.sandbox.commands.run(psql_install_cmd, timeout=90)
                     print(f"[Agent] psql install completed: exit_code={install_result.exit_code}")
                     if install_result.exit_code != 0:
                         print(f"[Agent] psql install stderr: {install_result.stderr[:200] if install_result.stderr else 'none'}")
@@ -995,8 +1166,66 @@ export MCP_USER_ID="{self.user_id}"
         except Exception as e:
             return f"Error reading file: {e}"
     
-    def _execute_tool(self, name: str, args: dict) -> str:
-        """Execute tool by name."""
+    def return_file(self, path: str, description: str = "") -> dict:
+        """Return a file to the user for download."""
+        if not self.sandbox:
+            return {"error": "Sandbox not initialized"}
+        
+        print(f"[Tool] return_file: {path}")
+        
+        try:
+            # Read file as bytes
+            content = self.sandbox.files.read(path)
+            
+            # If content is string, encode to bytes
+            if isinstance(content, str):
+                content_bytes = content.encode('utf-8')
+            else:
+                content_bytes = content
+            
+            # Base64 encode
+            content_b64 = base64.b64encode(content_bytes).decode('ascii')
+            
+            # Get filename from path
+            filename = path.split('/')[-1]
+            
+            # Determine MIME type
+            ext = filename.split('.')[-1].lower() if '.' in filename else ''
+            mime_types = {
+                'csv': 'text/csv',
+                'json': 'application/json',
+                'txt': 'text/plain',
+                'md': 'text/markdown',
+                'html': 'text/html',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'webp': 'image/webp',
+                'svg': 'image/svg+xml',
+                'pdf': 'application/pdf',
+                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'xls': 'application/vnd.ms-excel',
+                'zip': 'application/zip',
+            }
+            mime_type = mime_types.get(ext, 'application/octet-stream')
+            
+            print(f"[Tool] return_file: {filename} ({len(content_bytes)} bytes, {mime_type})")
+            
+            return {
+                "_file_artifact": True,
+                "filename": filename,
+                "mime_type": mime_type,
+                "size": len(content_bytes),
+                "data": content_b64,
+                "description": description or f"File: {filename}",
+            }
+        except Exception as e:
+            print(f"[Tool] return_file error: {e}")
+            return {"error": f"Error reading file: {e}"}
+    
+    def _execute_tool(self, name: str, args: dict) -> str | dict:
+        """Execute tool by name. Returns string for most tools, dict for file artifacts."""
         if name == "execute_command":
             return self.execute_command(
                 args.get("command", ""),
@@ -1009,6 +1238,11 @@ export MCP_USER_ID="{self.user_id}"
             )
         elif name == "read_file":
             return self.read_file(args.get("path", ""))
+        elif name == "return_file":
+            return self.return_file(
+                args.get("path", ""),
+                args.get("description", "")
+            )
         else:
             return f"Unknown tool: {name}"
     
@@ -1072,15 +1306,15 @@ export MCP_USER_ID="{self.user_id}"
                 
                 messages.append(msg_dict)
                 
-                # Add tool results as separate messages if they exist
+                # Add tool results as separate messages for each tool call
+                # OpenAI requires a tool message for EVERY tool_call, even if result is empty
                 if msg.get("tool_calls") and msg["role"] == "assistant":
                     for tc in msg["tool_calls"]:
-                        if tc.get("result"):
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc.get("id", ""),
-                                "content": tc.get("result", ""),
-                            })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            "content": tc.get("result", "") or "(no result)",
+                        })
         
         # Add the new user message
         messages.append({"role": "user", "content": user_message})
@@ -1132,6 +1366,23 @@ export MCP_USER_ID="{self.user_id}"
                     tc.function.name,
                     args,
                 )
+                
+                # Handle file artifacts specially
+                if isinstance(result, dict) and result.get("_file_artifact"):
+                    # Emit file event for frontend to handle
+                    emit("file", {
+                        "filename": result.get("filename", "file"),
+                        "mime_type": result.get("mime_type", "application/octet-stream"),
+                        "size": result.get("size", 0),
+                        "data": result.get("data", ""),
+                        "description": result.get("description", ""),
+                    })
+                    # Convert to string result for the LLM
+                    result = f"File '{result.get('filename')}' ({result.get('size')} bytes) has been sent to the user for download."
+                elif isinstance(result, dict) and result.get("error"):
+                    result = result.get("error")
+                elif isinstance(result, dict):
+                    result = json.dumps(result)
                 
                 # Truncate very long results
                 if len(result) > 8000:
