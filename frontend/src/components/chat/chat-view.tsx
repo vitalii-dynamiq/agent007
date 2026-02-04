@@ -204,6 +204,14 @@ interface StreamingState {
   files: FileArtifact[]  // Files returned by the agent
 }
 
+// Type for pending messages (exchanges not yet persisted to conversation.messages)
+interface PendingMessage {
+  userMessage: string
+  assistantContent: string
+  toolCalls: Array<{ id: string; name: string; arguments: string; result?: string }>
+  files: FileArtifact[]  // Files generated during this exchange
+}
+
 export function ChatView({ conversation, onConversationUpdate, onManageIntegrations, onCreateAndSend }: ChatViewProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [streamingState, setStreamingState] = useState<StreamingState | null>(null)
@@ -212,8 +220,11 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
   const [quickStartValue, setQuickStartValue] = useState('')
   // Keep files separately so they persist after streaming state is cleared
   const [sessionFiles, setSessionFiles] = useState<FileArtifact[]>([])
+  // Track pending messages (exchanges not yet persisted to conversation.messages)
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<(() => void) | null>(null)
+  const prevConvIdRef = useRef<string | undefined>(undefined)
 
   // Clear streaming state when conversation gets messages (after refresh)
   // Files are now added directly to sessionFiles in the event handler
@@ -224,9 +235,14 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
     }
   }, [conversation, conversation?.messages?.length, streamingState, isLoading, sessionFiles.length])
   
-  // Clear session files when conversation changes
+  // Clear session files and pending messages when conversation changes
   useEffect(() => {
-    setSessionFiles([])
+    if (conversation?.id !== prevConvIdRef.current) {
+      console.log('[ChatView] Conversation ID changed, clearing sessionFiles and pendingMessages. Old:', prevConvIdRef.current, 'New:', conversation?.id)
+      setSessionFiles([])
+      setPendingMessages([])
+      prevConvIdRef.current = conversation?.id
+    }
   }, [conversation?.id])
 
   // Fetch integrations once on mount
@@ -286,6 +302,24 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
 
   const handleSend = async (content: string, files?: UploadedFile[]) => {
     if (!conversation) return
+
+    // Save current streaming exchange to pending if it has content
+    if (streamingState?.userMessage && streamingState?.assistantContent) {
+      console.log('[ChatView] Saving current exchange to pendingMessages before new send, files:', sessionFiles.length)
+      setPendingMessages(prev => [...prev, {
+        userMessage: streamingState.userMessage!,
+        assistantContent: streamingState.assistantContent,
+        toolCalls: Array.from(streamingState.toolCalls.entries()).map(([id, tc]) => ({
+          id,
+          name: tc.name,
+          arguments: tc.arguments,
+          result: tc.result,
+        })),
+        files: [...sessionFiles],  // Include files from this exchange
+      }])
+      // Clear sessionFiles since they're now part of the pending message
+      setSessionFiles([])
+    }
 
     // Build user message with file info
     let userMessage = content
@@ -389,25 +423,13 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
       case 'file':
         console.log('[ChatView] file event received:', event.data)
         const fileData = event.data as unknown as FileArtifact
-        console.log('[ChatView] Adding file to state:', fileData.filename, fileData.size, 'bytes')
-        // Add to session files directly as well to ensure persistence
-        setSessionFiles(prev => {
-          console.log('[ChatView] sessionFiles before:', prev.length)
-          const newFiles = [...prev, fileData]
-          console.log('[ChatView] sessionFiles after:', newFiles.length)
-          return newFiles
-        })
-        setStreamingState((prev) => {
-          if (!prev) {
-            console.log('[ChatView] Warning: streamingState is null when file received')
-            return null
-          }
-          return {
-            ...prev,
-            files: [...prev.files, fileData],
-            status: `File ready: ${fileData.filename}`,
-          }
-        })
+        console.log('[ChatView] Adding file to sessionFiles:', fileData.filename, fileData.size, 'bytes')
+        // Only add to sessionFiles - don't duplicate in streamingState
+        setSessionFiles(prev => [...prev, fileData])
+        setStreamingState((prev) => prev ? {
+          ...prev,
+          status: `File ready: ${fileData.filename}`,
+        } : null)
         break
 
       case 'error':
@@ -422,6 +444,8 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
         setIsLoading(false)
         // Refresh conversation - this will update messages
         onConversationUpdate()
+        // Clear pending messages since conversation will be refreshed with all messages
+        setPendingMessages([])
         // Don't clear streaming state immediately - let it persist
         // It will be cleared when user sends another message or component remounts
         // This prevents the blank screen issue when conversation.messages is empty
@@ -640,18 +664,35 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
               )}
             </div>
           ))}
-          
-          {/* Session files (persisted after streaming completes) */}
-          {sessionFiles.length > 0 && (
-            <div className="px-4 py-2 space-y-2 border-t border-dashed">
-              <div className="text-xs text-muted-foreground mb-2">
-                Files ({sessionFiles.length}):
-              </div>
-              {sessionFiles.map((file, idx) => (
-                <FileDownload key={`session-${idx}`} file={file} />
-              ))}
+
+          {/* Pending messages (exchanges not yet persisted to conversation.messages) */}
+          {pendingMessages.map((pending, idx) => (
+            <div key={`pending-${idx}`}>
+              <Message role="user" content={pending.userMessage} />
+              {pending.toolCalls.length > 0 && (
+                <ToolCallsGroup count={pending.toolCalls.length}>
+                  {pending.toolCalls.map((tc) => (
+                    <ToolCall
+                      key={tc.id}
+                      name={tc.name}
+                      arguments={tc.arguments}
+                      result={tc.result}
+                      isExecuting={false}
+                    />
+                  ))}
+                </ToolCallsGroup>
+              )}
+              <Message role="assistant" content={pending.assistantContent} />
+              {/* Files generated during this exchange */}
+              {pending.files.length > 0 && (
+                <div className="px-4 py-2 space-y-2">
+                  {pending.files.map((file, fileIdx) => (
+                    <FileDownload key={`pending-file-${fileIdx}`} file={file} />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          ))}
 
           {/* Streaming state */}
           {streamingState && (
@@ -701,15 +742,15 @@ export function ChatView({ conversation, onConversationUpdate, onManageIntegrati
                   isStreaming={isLoading}
                 />
               )}
-
-              {/* File artifacts */}
-              {streamingState.files.length > 0 && (
-                <div className="px-4 py-2 space-y-2">
-                  {streamingState.files.map((file, idx) => (
-                    <FileDownload key={idx} file={file} />
-                  ))}
-                </div>
-              )}
+            </div>
+          )}
+          
+          {/* Files generated during current session - render after streaming or messages */}
+          {sessionFiles.length > 0 && (
+            <div className="px-4 py-2 space-y-2">
+              {sessionFiles.map((file, idx) => (
+                <FileDownload key={`session-${idx}`} file={file} />
+              ))}
             </div>
           )}
         </div>
